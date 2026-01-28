@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::net::SocketAddr;
 use tokio::net::lookup_host;
-use tokio_raknet::transport::{Message, RaknetListener, RaknetStream};
+use raknet::transport::{Message, RaknetListener, RaknetStream};
 use tracing::Level;
 use tracing_subscriber::{filter, layer::SubscriberExt, util::SubscriberInitExt};
 

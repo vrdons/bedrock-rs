@@ -107,7 +107,6 @@ impl RaknetStream {
         server: SocketAddr,
         config: RaknetStreamConfig,
     ) -> Result<Self, crate::RaknetError> {
-
         // if let Some(size) = config.socket_recv_buffer_size {
         //     let _ = socket.set_recv_buffer_size(size);
         // }
@@ -205,7 +204,7 @@ impl RaknetStream {
     }
 }
 
-struct OfflineHandshake {
+pub struct OfflineHandshake {
     mtu: u16,
     server_guid: u64,
     secure_connection_established: bool,
@@ -464,7 +463,7 @@ async fn run_client_muxer(socket: UdpSocket, mut context: ClientMuxerContext) {
 }
 
 #[tracing::instrument(skip_all, level = "debug")]
-async fn perform_offline_handshake(
+pub async fn perform_offline_handshake(
     socket: &UdpSocket,
     server: SocketAddr,
     _mtu_hint: usize,
@@ -599,7 +598,7 @@ async fn perform_offline_handshake(
     })
 }
 
-fn client_guid() -> u64 {
+pub fn client_guid() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
