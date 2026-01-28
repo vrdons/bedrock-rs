@@ -115,7 +115,12 @@ impl RaknetStream {
         //     let _ = socket.set_send_buffer_size(size);
         // }
 
-        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        let bind_addr: SocketAddr = if server.is_ipv4() {
+            "0.0.0.0:0".parse().unwrap()
+        } else {
+            "[::]:0".parse().unwrap()
+        };
+        let socket = UdpSocket::bind(bind_addr).await?;
         let local = socket.local_addr()?;
 
         // Perform offline handshake using OpenConnectionRequest1/2.
