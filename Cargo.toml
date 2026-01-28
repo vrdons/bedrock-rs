@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["raknet"]
+members = ["raknet", "nethernet"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -16,6 +16,7 @@ thiserror = "2.0.17"
 
 [dependencies]
 raknet = { path="./raknet" }
+nethernet = { path="./nethernet" }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = "0.3.22"
