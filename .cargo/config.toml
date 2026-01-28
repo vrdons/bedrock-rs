@@ -1,0 +1,2 @@
+[target.x86_64-linux-android]
+linker = "/home/KULLANICI_ADIN/Android/Sdk/ndk/2X.X.XXXXXXX/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android33-clang"
