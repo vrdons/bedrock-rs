@@ -107,8 +107,6 @@ impl RaknetStream {
         server: SocketAddr,
         config: RaknetStreamConfig,
     ) -> Result<Self, crate::RaknetError> {
-        let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
-        socket.set_nonblocking(true)?;
 
         // if let Some(size) = config.socket_recv_buffer_size {
         //     let _ = socket.set_recv_buffer_size(size);
@@ -117,7 +115,7 @@ impl RaknetStream {
         //     let _ = socket.set_send_buffer_size(size);
         // }
 
-        let socket = UdpSocket::from_std(socket)?;
+        let socket = UdpSocket::bind("0.0.0.0:0").await?;
         let local = socket.local_addr()?;
 
         // Perform offline handshake using OpenConnectionRequest1/2.

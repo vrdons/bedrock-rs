@@ -112,9 +112,6 @@ impl RaknetListener {
         addr: SocketAddr,
         config: RaknetListenerConfig,
     ) -> std::io::Result<Self> {
-        let socket = std::net::UdpSocket::bind(addr)?;
-        socket.set_nonblocking(true)?;
-
         // if let Some(size) = config.socket_recv_buffer_size {
         //     let _ = socket.set_recv_buffer_size(size);
         // }
@@ -122,7 +119,7 @@ impl RaknetListener {
         //     let _ = socket.set_send_buffer_size(size);
         // }
 
-        let socket = UdpSocket::from_std(socket)?;
+        let socket = UdpSocket::bind(addr).await?;
         let local_addr = socket.local_addr()?;
         let (new_conn_tx, new_conn_rx) = mpsc::channel(32);
         let (outbound_tx, outbound_rx) = mpsc::channel(1024);
