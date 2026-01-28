@@ -1,9 +1,3 @@
 [target.x86_64-linux-android]
 linker = "/opt/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android35-clang"
 ar = "/opt/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
-rustflags = [
-    "-C", "link-arg=-z", 
-    "-C", "link-arg=max-page-size=16384",
-    "-C", "link-arg=-z", 
-    "-C", "link-arg=common-page-size=16384"
-]
