@@ -1,0 +1,11 @@
+[package]
+name = "tokio-raknet"
+version = "0.2.0"
+edition = "2024"
+
+[dependencies]
+bitflags = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

@@ -3,8 +3,19 @@ name = "bedrock"
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
-tokio = { version = "1.49.0", features = ["full"] }
-tokio-raknet = "0.2.0"
+[workspace]
+members = ["tokio-raknet"]
+resolver = "2"
+
+[workspace.dependencies]
+tokio = { version = "1.49.0", features = ["net", "sync", "time", "rt-multi-thread", "macros"] }
 tracing = "0.1.44"
+bitflags = "2.10.0"
+bytes = "1.11.0"
+thiserror = "2.0.17"
+
+[dependencies]
+tokio-raknet = { path="./tokio-raknet" }
+tokio = { workspace = true }
+tracing = { workspace = true }
 tracing-subscriber = "0.3.22"
