@@ -104,11 +104,11 @@ pub struct RaknetListener {
 impl RaknetListener {
     /// Binds a new listener to the specified address using default configuration.
     pub async fn bind(addr: SocketAddr) -> std::io::Result<Self> {
-        Self::bind_with_config(addr, RaknetListenerConfig::default()).await
+        Self::bind_with(addr, RaknetListenerConfig::default()).await
     }
 
     /// Binds a new listener to the specified address using the provided configuration.
-    pub async fn bind_with_config(
+    pub async fn bind_with(
         addr: SocketAddr,
         config: RaknetListenerConfig,
     ) -> std::io::Result<Self> {

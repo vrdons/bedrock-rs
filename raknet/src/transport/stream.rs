@@ -99,11 +99,11 @@ impl RaknetStream {
 
     /// Connect to a RakNet server at the given address using default configuration.
     pub async fn connect(server: SocketAddr) -> Result<Self, crate::RaknetError> {
-        Self::connect_with_config(server, RaknetStreamConfig::default()).await
+        Self::connect_with(server, RaknetStreamConfig::default()).await
     }
 
     /// Connect to a RakNet server with a custom configuration.
-    pub async fn connect_with_config(
+    pub async fn connect_with(
         server: SocketAddr,
         config: RaknetStreamConfig,
     ) -> Result<Self, crate::RaknetError> {
