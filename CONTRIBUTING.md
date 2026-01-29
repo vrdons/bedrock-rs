@@ -1,6 +1,6 @@
-# Contributing to tokio-raknet
+# Contributing to bedrock
 
-Thank you for your interest in contributing to `tokio-raknet`!
+Thank you for your interest in contributing to `bedrock`!
 
 ## Development Environment
 
