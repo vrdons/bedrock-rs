@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 cargo build --example forwarder --target x86_64-linux-android
 
 waydroid adb connect
