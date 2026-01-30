@@ -10,6 +10,8 @@ pub enum RaknetError {
     Decode(#[from] crate::protocol::packet::DecodeError),
     #[error("packet encode error: {0}")]
     Encode(#[from] crate::protocol::packet::EncodeError),
+    #[error("missing config value: {0}")]
+    MissingConfigValue(String),
     #[error("connection request failed")]
     ConnectionRequestFailed,
     #[error("already connected")]

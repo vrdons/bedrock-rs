@@ -9,6 +9,10 @@ use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use futures::{Stream, StreamExt};
+
 use crate::protocol::constants::{self, UDP_HEADER_SIZE};
 use crate::transport::listener_conn::SessionState;
 use crate::transport::mux::new_tick_interval;
@@ -18,10 +22,12 @@ use offline::PendingConnection;
 
 use online::{dispatch_datagram, handle_outgoing_msg, tick_sessions};
 
-/// Configuration for a `RaknetListener`.
+/// Configuration for a [`RaknetListener`].
 #[derive(Debug, Clone)]
-
 pub struct RaknetListenerConfig {
+    /// Address to start server.
+    pub bind_addr: Option<SocketAddr>,
+
     /// Maximum number of concurrent connections allowed.
     pub max_connections: usize,
 
@@ -71,6 +77,7 @@ pub struct RaknetListenerConfig {
 impl Default for RaknetListenerConfig {
     fn default() -> Self {
         Self {
+            bind_addr: None,
             max_connections: 1024,
             max_pending_connections: 1024,
             max_mtu: 1400,
@@ -90,6 +97,194 @@ impl Default for RaknetListenerConfig {
     }
 }
 
+impl RaknetListenerConfig {
+    /// Creates a new [`RaknetListenerConfig`] with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates a builder for [`RaknetListenerConfig`].
+    pub fn builder() -> RaknetListenerConfigBuilder {
+        RaknetListenerConfigBuilder::default()
+    }
+}
+
+/// Configuration builder for [`RaknetListener`].
+#[derive(Debug, Clone)]
+pub struct RaknetListenerConfigBuilder {
+    bind_addr: Option<SocketAddr>,
+    max_connections: usize,
+    max_pending_connections: usize,
+    max_mtu: u16,
+    socket_recv_buffer_size: Option<usize>,
+    socket_send_buffer_size: Option<usize>,
+    session_timeout: Duration,
+    session_stale: Duration,
+    max_queued_reliable_bytes: usize,
+    advertisement: Vec<u8>,
+    max_ordering_channels: usize,
+    ack_queue_capacity: usize,
+    split_timeout: Duration,
+    reliable_window: u32,
+    max_split_parts: u32,
+    max_concurrent_splits: usize,
+}
+
+impl Default for RaknetListenerConfigBuilder {
+    fn default() -> Self {
+        let config = RaknetListenerConfig::default();
+        Self {
+            bind_addr: config.bind_addr,
+            max_connections: config.max_connections,
+            max_pending_connections: config.max_pending_connections,
+            max_mtu: config.max_mtu,
+            socket_recv_buffer_size: config.socket_recv_buffer_size,
+            socket_send_buffer_size: config.socket_send_buffer_size,
+            session_timeout: config.session_timeout,
+            session_stale: config.session_stale,
+            max_queued_reliable_bytes: config.max_queued_reliable_bytes,
+            advertisement: config.advertisement,
+            max_ordering_channels: config.max_ordering_channels,
+            ack_queue_capacity: config.ack_queue_capacity,
+            split_timeout: config.split_timeout,
+            reliable_window: config.reliable_window,
+            max_split_parts: config.max_split_parts,
+            max_concurrent_splits: config.max_concurrent_splits,
+        }
+    }
+}
+
+impl From<RaknetListenerConfigBuilder> for RaknetListenerConfig {
+    fn from(builder: RaknetListenerConfigBuilder) -> Self {
+        builder.build()
+    }
+}
+
+impl RaknetListenerConfigBuilder {
+    /// Creates a new [`RaknetListenerConfigBuilder`] with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+    /// Sets the bind address.
+    #[must_use]
+    pub fn bind_address(mut self, addr: impl Into<SocketAddr>) -> Self {
+        self.bind_addr = Some(addr.into());
+        self
+    }
+
+    /// Sets the maximum number of concurrent connections.
+    pub fn max_connections(mut self, value: usize) -> Self {
+        self.max_connections = value;
+        self
+    }
+
+    /// Sets the maximum number of pending connections.
+    pub fn max_pending_connections(mut self, value: usize) -> Self {
+        self.max_pending_connections = value;
+        self
+    }
+
+    /// Sets the maximum MTU size.
+    pub fn max_mtu(mut self, mtu: u16) -> Self {
+        self.max_mtu = mtu;
+        self
+    }
+
+    /// Sets the socket receive buffer size.
+    pub fn socket_recv_buffer_size(mut self, size: Option<usize>) -> Self {
+        self.socket_recv_buffer_size = size;
+        self
+    }
+
+    /// Sets the socket send buffer size.
+    pub fn socket_send_buffer_size(mut self, size: Option<usize>) -> Self {
+        self.socket_send_buffer_size = size;
+        self
+    }
+
+    /// Sets the session inactivity timeout.
+    pub fn session_timeout(mut self, timeout: Duration) -> Self {
+        self.session_timeout = timeout;
+        self
+    }
+
+    /// Sets the session stale duration.
+    pub fn session_stale(mut self, duration: Duration) -> Self {
+        self.session_stale = duration;
+        self
+    }
+
+    /// Sets the maximum queued reliable bytes per session.
+    pub fn max_queued_reliable_bytes(mut self, bytes: usize) -> Self {
+        self.max_queued_reliable_bytes = bytes;
+        self
+    }
+
+    /// Sets the advertisement payload.
+    pub fn advertisement(mut self, advertisement: impl Into<Vec<u8>>) -> Self {
+        self.advertisement = advertisement.into();
+        self
+    }
+
+    /// Sets the maximum number of ordering channels.
+    pub fn max_ordering_channels(mut self, channels: usize) -> Self {
+        self.max_ordering_channels = channels;
+        self
+    }
+
+    /// Sets the ACK queue capacity.
+    pub fn ack_queue_capacity(mut self, capacity: usize) -> Self {
+        self.ack_queue_capacity = capacity;
+        self
+    }
+
+    /// Sets the timeout for split packet reassembly.
+    pub fn split_timeout(mut self, timeout: Duration) -> Self {
+        self.split_timeout = timeout;
+        self
+    }
+
+    /// Sets the reliable window size.
+    pub fn reliable_window(mut self, window: u32) -> Self {
+        self.reliable_window = window;
+        self
+    }
+
+    /// Sets the maximum number of parts in a split packet.
+    pub fn max_split_parts(mut self, parts: u32) -> Self {
+        self.max_split_parts = parts;
+        self
+    }
+
+    /// Sets the maximum number of concurrent split packets.
+    pub fn max_concurrent_splits(mut self, splits: usize) -> Self {
+        self.max_concurrent_splits = splits;
+        self
+    }
+
+    /// Builds the [`RaknetListenerConfig`].
+    pub fn build(self) -> RaknetListenerConfig {
+        RaknetListenerConfig {
+            bind_addr: self.bind_addr,
+            max_connections: self.max_connections,
+            max_pending_connections: self.max_pending_connections,
+            max_mtu: self.max_mtu,
+            socket_recv_buffer_size: self.socket_recv_buffer_size,
+            socket_send_buffer_size: self.socket_send_buffer_size,
+            session_timeout: self.session_timeout,
+            session_stale: self.session_stale,
+            max_queued_reliable_bytes: self.max_queued_reliable_bytes,
+            advertisement: self.advertisement,
+            max_ordering_channels: self.max_ordering_channels,
+            ack_queue_capacity: self.ack_queue_capacity,
+            split_timeout: self.split_timeout,
+            reliable_window: self.reliable_window,
+            max_split_parts: self.max_split_parts,
+            max_concurrent_splits: self.max_concurrent_splits,
+        }
+    }
+}
+
 /// Server-side RakNet listener that accepts new connections.
 pub struct RaknetListener {
     local_addr: SocketAddr,
@@ -102,16 +297,15 @@ pub struct RaknetListener {
 }
 
 impl RaknetListener {
-    /// Binds a new listener to the specified address using default configuration.
-    pub async fn bind(addr: SocketAddr) -> std::io::Result<Self> {
-        Self::bind_with_config(addr, RaknetListenerConfig::default()).await
-    }
-
     /// Binds a new listener to the specified address using the provided configuration.
-    pub async fn bind_with_config(
-        addr: SocketAddr,
-        config: RaknetListenerConfig,
-    ) -> std::io::Result<Self> {
+    pub async fn bind(config: RaknetListenerConfig) -> std::io::Result<Self> {
+        let addr = config.bind_addr.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "bind_addr is required in config",
+            )
+        })?;
+        let socket = UdpSocket::bind(addr).await?;
         // if let Some(size) = config.socket_recv_buffer_size {
         //     let _ = socket.set_recv_buffer_size(size);
         // }
@@ -119,7 +313,6 @@ impl RaknetListener {
         //     let _ = socket.set_send_buffer_size(size);
         // }
 
-        let socket = UdpSocket::bind(addr).await?;
         let local_addr = socket.local_addr()?;
         let (new_conn_tx, new_conn_rx) = mpsc::channel(32);
         let (outbound_tx, outbound_rx) = mpsc::channel(1024);
@@ -147,14 +340,7 @@ impl RaknetListener {
 
     /// Accepts the next incoming connection.
     pub async fn accept(&mut self) -> Option<RaknetStream> {
-        let (peer, incoming) = self.new_connections.recv().await?;
-
-        Some(RaknetStream::new(
-            self.local_addr,
-            peer,
-            incoming,
-            self.outbound_tx.clone(),
-        ))
+        self.next().await
     }
 
     /// Sets the advertisement data (Pong payload) sent in response to UnconnectedPing (0x01) and OpenConnections (0x02).
@@ -170,6 +356,23 @@ impl RaknetListener {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+}
+
+impl Stream for RaknetListener {
+    type Item = RaknetStream;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.new_connections.poll_recv(cx) {
+            Poll::Ready(Some((peer, incoming))) => Poll::Ready(Some(RaknetStream::new(
+                self.local_addr,
+                peer,
+                incoming,
+                self.outbound_tx.clone(),
+            ))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
     }
 }
 

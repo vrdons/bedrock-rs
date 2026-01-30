@@ -1,25 +1,18 @@
-//! # tokio-raknet
 //!
-//! A high-performance, asynchronous implementation of the RakNet protocol written in pure Rust.
-//! Built on top of the [Tokio](https://tokio.rs) runtime, it is designed to provide a modern,
-//! ergonomic API for building robust UDP-based networked applications, games, and services.
-//!
-//! ## Features
-//!
-//! *   **Fully Asynchronous**: Built with `async`/`await` for high concurrency.
-//! *   **Reliability Layers**: Support for Reliable, Unreliable, Ordered, Sequenced, etc.
-//! *   **Fragmentation**: Automatic splitting and reassembly of large packets.
-//! *   **Simple API**: High-level abstraction resembling `TcpStream` but for UDP/RakNet.
 //!
 //! ## Example: Client
 //!
 //! ```rust,no_run
-//! use tokio_raknet::RaknetStream;
+//! use raknet::{RaknetStream, transport::RaknetStreamConfigBuilder};
 //! use bytes::Bytes;
+//! use std::net::SocketAddr;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let mut client = RaknetStream::connect("127.0.0.1:19132".parse()?).await?;
+//!     let addr: SocketAddr = "127.0.0.1:19132".parse()?;
+//!     let mut client = RaknetStream::connect(RaknetStreamConfigBuilder::new()
+//!            .connect_addr(addr)
+//!            .build()).await?;
 //!     client.send("Hello!").await?;
 //!     Ok(())
 //! }
@@ -28,14 +21,22 @@
 //! ## Example: Server
 //!
 //! ```rust,no_run
-//! use tokio_raknet::RaknetListener;
+//! use raknet::{RaknetListener, transport::RaknetListenerConfigBuilder};
+//! use futures::StreamExt;
+//! use std::net::SocketAddr;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let mut listener = RaknetListener::bind("0.0.0.0:19132".parse()?).await?;
-//!     while let Some(mut conn) = listener.accept().await {
+//!     let addr: SocketAddr = "0.0.0.0:19132".parse()?;
+//!     let mut listener = RaknetListener::bind(RaknetListenerConfigBuilder::new()
+//!         .bind_address(addr)
+//!         .build()).await?;
+//!
+//!     // RaknetListener implements Stream
+//!     while let Some(mut conn) = listener.next().await {
 //!         tokio::spawn(async move {
-//!             while let Some(msg) = conn.recv().await {
+//!             // RaknetStream also implements Stream
+//!             while let Some(msg) = conn.next().await {
 //!                 // Handle packet
 //!             }
 //!         });

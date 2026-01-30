@@ -235,11 +235,20 @@ impl ManagedSession {
 
     /// Build the next outgoing datagram, if any.
     /// ACKs/NACKs/Resends are built in `on_tick`.
-    pub fn build_datagram(&mut self, now: Instant) -> Option<Datagram> {
+    pub fn build_datagram(&mut self, now: Instant) -> Option<crate::session::OutgoingDatagram> {
         let dgram = self.inner.build_data_datagram(now)?;
 
-        if let DatagramPayload::EncapsulatedPackets(packets) = &dgram.payload {
-            self.debit_reliable_bytes(packets);
+        match &dgram {
+            crate::session::OutgoingDatagram::Shared(d) => {
+                if let DatagramPayload::EncapsulatedPackets(packets) = &d.payload {
+                    self.debit_reliable_bytes(packets);
+                }
+            }
+            crate::session::OutgoingDatagram::Owned(d) => {
+                if let DatagramPayload::EncapsulatedPackets(packets) = &d.payload {
+                    self.debit_reliable_bytes(packets);
+                }
+            }
         }
 
         Some(dgram)
@@ -322,7 +331,11 @@ mod tests {
             .build_datagram(now)
             .expect("expected datagram with connection request");
 
-        let pkt = decode_first_packet(&dgram);
+        let d_ref = match &dgram {
+            crate::session::OutgoingDatagram::Shared(d) => d.as_ref(),
+            crate::session::OutgoingDatagram::Owned(d) => d,
+        };
+        let pkt = decode_first_packet(d_ref);
         assert!(matches!(pkt, RaknetPacket::ConnectionRequest(_)));
     }
 
@@ -348,7 +361,11 @@ mod tests {
         let dgram = ms
             .build_datagram(now)
             .expect("expected datagram with connection request accepted");
-        let pkt = decode_first_packet(&dgram);
+        let d_ref = match &dgram {
+            crate::session::OutgoingDatagram::Shared(d) => d.as_ref(),
+            crate::session::OutgoingDatagram::Owned(d) => d,
+        };
+        let pkt = decode_first_packet(d_ref);
 
         assert!(matches!(pkt, RaknetPacket::ConnectionRequestAccepted(_)));
     }
@@ -371,7 +388,11 @@ mod tests {
             .build_datagram(now)
             .expect("expected datagram containing connected ping");
 
-        let pkt = decode_first_packet(&dgram);
+        let d_ref = match &dgram {
+            crate::session::OutgoingDatagram::Shared(d) => d.as_ref(),
+            crate::session::OutgoingDatagram::Owned(d) => d,
+        };
+        let pkt = decode_first_packet(d_ref);
         assert!(matches!(pkt, RaknetPacket::ConnectedPing(_)));
     }
 

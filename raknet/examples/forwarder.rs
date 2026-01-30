@@ -1,7 +1,10 @@
-use std::error::Error;
+use futures::StreamExt;
+use raknet::transport::{
+    Message, RaknetListener, RaknetListenerConfigBuilder, RaknetStream, RaknetStreamConfigBuilder,
+};
 use std::net::SocketAddr;
+use std::{env, error::Error};
 use tokio::net::lookup_host;
-use raknet::transport::{Message, RaknetListener, RaknetStream};
 use tracing::Level;
 use tracing_subscriber::{filter, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -16,17 +19,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with(filter_layer)
         .init();
 
-    let bind_addr: SocketAddr = "0.0.0.0:19132".parse()?;
-    let target_host: &str = "play.cubecraft.net:19132"; // play.lbsg.net
+    let args: Vec<String> = env::args().collect();
+    let bind_addr: SocketAddr = args
+        .get(1)
+        .map(|s| s.as_str())
+        .unwrap_or("0.0.0.0:19132")
+        .parse()?;
+    let target_host: &str = args
+        .get(2)
+        .map(|s| s.as_str())
+        .unwrap_or("play.cubecraft.net:19132");
 
     tracing::info!("RakNet Forwarder starting...");
     tracing::info!("Listening on: {}", bind_addr);
     tracing::info!("Forwarding to: {}", target_host);
 
-    let mut listener = RaknetListener::bind(bind_addr).await?;
+    let mut listener = RaknetListener::bind(
+        RaknetListenerConfigBuilder::new()
+            .bind_address(bind_addr)
+            .build(),
+    )
+    .await?;
 
     // Accept only one connection
-    if let Some(client_stream) = listener.accept().await {
+    if let Some(client_stream) = listener.next().await {
         let target = target_host.to_string();
         // Handle the connection in the main task (blocking)
         if let Err(e) = handle_connection(client_stream, target).await {
@@ -51,7 +67,12 @@ async fn handle_connection(
     let remote_addr = addrs.next().ok_or("Failed to resolve target host")?;
 
     tracing::info!("[{}] Connecting to server {}...", client_addr, remote_addr);
-    let mut server = RaknetStream::connect(remote_addr).await?;
+    let mut server = RaknetStream::connect(
+        RaknetStreamConfigBuilder::new()
+            .connect_addr(remote_addr)
+            .build(),
+    )
+    .await?;
     tracing::info!("[{}] Connected to server!", client_addr);
 
     // Split the streams locally to manage concurrent read/writes
@@ -62,7 +83,7 @@ async fn handle_connection(
     loop {
         tokio::select! {
             // Client -> Server
-            res = client.recv_msg() => {
+            res = client.next() => {
                 match res {
                     Some(Ok(packet)) => {
                         let outbound = Message::new(packet.buffer)
@@ -71,18 +92,18 @@ async fn handle_connection(
                         server.send(outbound).await?;
                     }
                     Some(Err(e)) => {
-                        tracing::info!("[{}] Client error: {:?}", client_addr, e);
+                        tracing::warn!("[{}] Client error: {:?}", client_addr, e);
                         break;
                     }
                     None => {
-                        tracing::info!("[{}] Client disconnected", client_addr);
+                        tracing::warn!("[{}] Client disconnected", client_addr);
                         break;
                     }
                 }
             }
 
             // Server -> Client
-            res = server.recv_msg() => {
+            res = server.next() => {
                 match res {
                     Some(Ok(packet)) => {
                         let outbound = Message::new(packet.buffer)

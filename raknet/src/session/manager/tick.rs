@@ -1,7 +1,6 @@
 use std::time::Instant;
 
 use crate::protocol::{
-    datagram::Datagram,
     encapsulated_packet::EncapsulatedPacket,
     packet::{ConnectedPing, RaknetPacket},
     reliability::Reliability,
@@ -12,7 +11,7 @@ use super::{ConnectionState, ManagedSession};
 
 impl ManagedSession {
     /// Run periodic maintenance and return any datagrams that should be sent.
-    pub fn on_tick(&mut self, now: Instant) -> Vec<Datagram> {
+    pub fn on_tick(&mut self, now: Instant) -> Vec<crate::session::OutgoingDatagram> {
         if self.is_connected() {
             let idle = now.saturating_duration_since(self.last_activity);
             if idle >= self.config.session_timeout {

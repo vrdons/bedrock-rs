@@ -3,9 +3,17 @@ name = "raknet"
 version = "0.2.0"
 edition = "2024"
 
+[dev-dependencies]
+tracing-subscriber = "0.3.22"
+
+
 [dependencies]
 bitflags = { workspace = true }
 bytes = { workspace = true }
+futures = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+
+[[example]]
+name = "forwarder"
