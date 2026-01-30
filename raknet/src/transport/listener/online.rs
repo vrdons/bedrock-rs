@@ -33,8 +33,15 @@ pub(super) async fn dispatch_datagram(
     )>,
     advertisement: &Arc<RwLock<Vec<u8>>>,
 ) {
-    if sessions.contains_key(&peer) {
-        if !handle_incoming_udp(socket, config, bytes, peer, sessions, pending, new_conn_tx).await {
+    if let Some(state) = sessions.get_mut(&peer) {
+        let (decoded, should_remove) =
+            handle_incoming_udp(socket, config, bytes, peer, state, pending, new_conn_tx).await;
+
+        if should_remove {
+            sessions.remove(&peer);
+        }
+
+        if !decoded {
             // If decoding failed, check if it is an offline packet (e.g. handshake retry).
             // If so, don't kill the session; let handle_offline deal with it.
             if is_offline_packet_id(bytes[0]) {
@@ -152,40 +159,28 @@ pub(super) async fn tick_sessions(
     }
 }
 
-#[tracing::instrument(skip(socket, sessions, _pending, new_conn_tx), level = "trace")]
+#[tracing::instrument(skip(socket, state, _pending, new_conn_tx), level = "trace")]
 async fn handle_incoming_udp(
     socket: &UdpSocket,
     config: &RaknetListenerConfig,
     bytes: &[u8],
     peer: SocketAddr,
-    sessions: &mut HashMap<SocketAddr, SessionState>,
+    state: &mut SessionState,
     _pending: &mut HashMap<SocketAddr, PendingConnection>,
     new_conn_tx: &mpsc::Sender<(
         SocketAddr,
         mpsc::Receiver<Result<crate::transport::ReceivedMessage, crate::RaknetError>>,
     )>,
-) -> bool {
+) -> (bool, bool) {
     let mut slice = bytes;
     let dgram = match Datagram::decode(&mut slice) {
         Ok(d) => d,
         Err(e) => {
             tracing::debug!(error = ?e, "failed to decode datagram");
-            return false;
+            return (false, false);
         }
     };
     let now = Instant::now();
-    let state = sessions.entry(peer).or_insert_with(|| {
-        tracing::debug!(mtu = config.max_mtu, "create_session");
-        let (tx, rx) = mpsc::channel(128);
-        let sess_config = server_session_config(config);
-        let sess = ManagedSession::with_config(peer, config.max_mtu as usize, now, sess_config);
-        SessionState {
-            managed: sess,
-            to_app: tx,
-            pending_rx: Some(rx),
-            announced: false,
-        }
-    });
 
     let closed_after = if let Ok(pkts) = state.managed.handle_datagram(dgram, now) {
         if tracing::enabled!(tracing::Level::TRACE) {
@@ -230,9 +225,9 @@ async fn handle_incoming_udp(
                     .await;
             }
         }
-        sessions.remove(&peer);
+        return (true, true);
     }
-    true
+    (true, false)
 }
 
 #[tracing::instrument(skip(state, new_conn_tx), level = "trace")]

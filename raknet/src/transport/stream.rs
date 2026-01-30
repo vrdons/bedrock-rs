@@ -6,6 +6,10 @@ use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{self, MissedTickBehavior, timeout};
 
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use futures::{Stream, StreamExt};
+
 use crate::protocol::{
     constants::{
         DEFAULT_UNCONNECTED_MAGIC, MAXIMUM_MTU_SIZE, MINIMUM_MTU_SIZE, RAKNET_PROTOCOL_VERSION,
@@ -331,7 +335,7 @@ impl RaknetStream {
     }
 
     pub async fn recv_msg(&mut self) -> Option<Result<ReceivedMessage, crate::RaknetError>> {
-        self.incoming.recv().await
+        self.next().await
     }
 
     pub async fn send(&self, msg: impl Into<super::Message>) -> Result<(), crate::RaknetError> {
@@ -353,6 +357,14 @@ impl RaknetStream {
             })
             .await
             .map_err(|_| crate::RaknetError::ConnectionClosed)
+    }
+}
+
+impl Stream for RaknetStream {
+    type Item = Result<ReceivedMessage, crate::RaknetError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.incoming.poll_recv(cx)
     }
 }
 

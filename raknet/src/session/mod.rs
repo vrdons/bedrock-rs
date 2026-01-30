@@ -22,14 +22,17 @@ mod tick;
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BinaryHeap, VecDeque},
+    sync::Arc,
     time::{Duration, Instant},
 };
+
+use bytes::BufMut;
 
 use crate::protocol::{
     constants::{self, MAX_ACK_SEQUENCES},
     datagram::Datagram,
     encapsulated_packet::EncapsulatedPacket,
-    packet::{DecodeError, RaknetPacket},
+    packet::{DecodeError, EncodeError, RaknetPacket},
     reliability::Reliability,
     types::Sequence24,
 };
@@ -73,8 +76,32 @@ impl Default for SessionTunables {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum OutgoingDatagram {
+    Shared(Arc<Datagram>),
+    Owned(Datagram),
+}
+
+impl OutgoingDatagram {
+    pub fn encode(&self, dst: &mut impl BufMut) -> Result<(), EncodeError> {
+        match self {
+            Self::Shared(d) => d.encode(dst),
+            Self::Owned(d) => d.encode(dst),
+        }
+    }
+}
+
+impl AsRef<Datagram> for OutgoingDatagram {
+    fn as_ref(&self) -> &Datagram {
+        match self {
+            Self::Shared(d) => d,
+            Self::Owned(d) => d,
+        }
+    }
+}
+
 struct TrackedDatagram {
-    datagram: Datagram,
+    datagram: Arc<Datagram>,
     send_time: Instant,
     next_send: Instant,
 }
@@ -271,13 +298,13 @@ mod tests {
         let ack = out
             .iter()
             .find(|d| {
-                d.header
+                d.as_ref().header
                     .flags
                     .contains(crate::protocol::constants::DatagramFlags::ACK)
             })
             .expect("ack datagram present");
 
-        if let crate::protocol::datagram::DatagramPayload::Ack(payload) = &ack.payload {
+        if let crate::protocol::datagram::DatagramPayload::Ack(payload) = &ack.as_ref().payload {
             assert_eq!(payload.ranges.len(), 1);
         } else {
             panic!("expected ack datagram");

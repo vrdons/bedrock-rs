@@ -1219,6 +1219,7 @@ version = "0.2.0"
 dependencies = [
  "bitflags 2.10.0",
  "bytes",
+ "futures",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

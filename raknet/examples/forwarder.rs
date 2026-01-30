@@ -1,3 +1,4 @@
+use futures::StreamExt;
 use raknet::transport::{
     Message, RaknetListener, RaknetListenerConfigBuilder, RaknetStream, RaknetStreamConfigBuilder,
 };
@@ -41,7 +42,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .await?;
 
     // Accept only one connection
-    if let Some(client_stream) = listener.accept().await {
+    if let Some(client_stream) = listener.next().await {
         let target = target_host.to_string();
         // Handle the connection in the main task (blocking)
         if let Err(e) = handle_connection(client_stream, target).await {
@@ -82,7 +83,7 @@ async fn handle_connection(
     loop {
         tokio::select! {
             // Client -> Server
-            res = client.recv_msg() => {
+            res = client.next() => {
                 match res {
                     Some(Ok(packet)) => {
                         let outbound = Message::new(packet.buffer)
@@ -102,7 +103,7 @@ async fn handle_connection(
             }
 
             // Server -> Client
-            res = server.recv_msg() => {
+            res = server.next() => {
                 match res {
                     Some(Ok(packet)) => {
                         let outbound = Message::new(packet.buffer)

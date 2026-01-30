@@ -9,6 +9,10 @@ use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use futures::{Stream, StreamExt};
+
 use crate::protocol::constants::{self, UDP_HEADER_SIZE};
 use crate::transport::listener_conn::SessionState;
 use crate::transport::mux::new_tick_interval;
@@ -336,14 +340,7 @@ impl RaknetListener {
 
     /// Accepts the next incoming connection.
     pub async fn accept(&mut self) -> Option<RaknetStream> {
-        let (peer, incoming) = self.new_connections.recv().await?;
-
-        Some(RaknetStream::new(
-            self.local_addr,
-            peer,
-            incoming,
-            self.outbound_tx.clone(),
-        ))
+        self.next().await
     }
 
     /// Sets the advertisement data (Pong payload) sent in response to UnconnectedPing (0x01) and OpenConnections (0x02).
@@ -359,6 +356,23 @@ impl RaknetListener {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+}
+
+impl Stream for RaknetListener {
+    type Item = RaknetStream;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.new_connections.poll_recv(cx) {
+            Poll::Ready(Some((peer, incoming))) => Poll::Ready(Some(RaknetStream::new(
+                self.local_addr,
+                peer,
+                incoming,
+                self.outbound_tx.clone(),
+            ))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
     }
 }
 

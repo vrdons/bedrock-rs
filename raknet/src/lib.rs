@@ -22,6 +22,7 @@
 //!
 //! ```rust,no_run
 //! use raknet::{RaknetListener, transport::RaknetListenerConfigBuilder};
+//! use futures::StreamExt;
 //! use std::net::SocketAddr;
 //!
 //! #[tokio::main]
@@ -30,9 +31,12 @@
 //!     let mut listener = RaknetListener::bind(RaknetListenerConfigBuilder::new()
 //!         .bind_address(addr)
 //!         .build()).await?;
-//!     while let Some(mut conn) = listener.accept().await {
+//!
+//!     // RaknetListener implements Stream
+//!     while let Some(mut conn) = listener.next().await {
 //!         tokio::spawn(async move {
-//!             while let Some(msg) = conn.recv().await {
+//!             // RaknetStream also implements Stream
+//!             while let Some(msg) = conn.next().await {
 //!                 // Handle packet
 //!             }
 //!         });

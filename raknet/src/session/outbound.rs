@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 use bytes::BytesMut;
 
@@ -13,7 +13,7 @@ use crate::protocol::{
     types::{EncapsulatedPacketHeader, Sequence24},
 };
 
-use super::{QueuedEncap, Session, TrackedDatagram};
+use super::{OutgoingDatagram, QueuedEncap, Session, TrackedDatagram};
 
 impl Session {
     pub fn queue_packet(
@@ -42,7 +42,7 @@ impl Session {
     }
 
     /// Build the next DATA datagram to send, if any, respecting MTU and sliding window.
-    pub fn build_data_datagram(&mut self, now: Instant) -> Option<Datagram> {
+    pub fn build_data_datagram(&mut self, now: Instant) -> Option<OutgoingDatagram> {
         if self.outgoing_heap.is_empty() {
             return None;
         }
@@ -92,7 +92,7 @@ impl Session {
             return Some(self.track_sent_datagram(dgram, seq, now));
         }
 
-        Some(dgram)
+        Some(OutgoingDatagram::Owned(dgram))
     }
 
     fn fill_datagram(
@@ -118,7 +118,7 @@ impl Session {
         }
     }
 
-    pub(crate) fn build_ack_datagram(&mut self, _now: Instant) -> Option<Datagram> {
+    pub(crate) fn build_ack_datagram(&mut self, _now: Instant) -> Option<OutgoingDatagram> {
         let mut ranges = self.outgoing_acks.pop_for_mtu(
             self.mtu,
             constants::IPV4_HEADER_SIZE + constants::UDP_HEADER_SIZE + 2 + 1,
@@ -142,10 +142,10 @@ impl Session {
         };
 
         self.sliding.on_send_ack();
-        Some(dgram)
+        Some(OutgoingDatagram::Owned(dgram))
     }
 
-    pub(crate) fn build_nak_datagram(&mut self) -> Option<Datagram> {
+    pub(crate) fn build_nak_datagram(&mut self) -> Option<OutgoingDatagram> {
         let mut ranges = self.outgoing_naks.pop_for_mtu(
             self.mtu,
             constants::IPV4_HEADER_SIZE + constants::UDP_HEADER_SIZE + 2 + 1,
@@ -167,7 +167,7 @@ impl Session {
             payload: DatagramPayload::Nak(nak_payload),
         };
 
-        Some(dgram)
+        Some(OutgoingDatagram::Owned(dgram))
     }
 
     /// Maximum payload size for an encapsulated packet given the current MTU.
@@ -342,19 +342,19 @@ impl Session {
         size
     }
 
-    fn track_sent_datagram(&mut self, dgram: Datagram, seq: Sequence24, now: Instant) -> Datagram {
+    fn track_sent_datagram(&mut self, dgram: Datagram, seq: Sequence24, now: Instant) -> OutgoingDatagram {
         let rto = self.sliding.get_rto_for_retransmission();
+        let dgram = Arc::new(dgram);
         let tracked = TrackedDatagram {
-            datagram: dgram,
+            datagram: dgram.clone(),
             send_time: now,
             next_send: now + rto,
         };
         if let DatagramPayload::EncapsulatedPackets(_) = &tracked.datagram.payload {
             self.sliding.on_reliable_send(&tracked.datagram);
         }
-        let dgram = tracked.datagram.clone();
         self.sent_datagrams.insert(seq, tracked);
-        dgram
+        OutgoingDatagram::Shared(dgram)
     }
 
     fn get_next_weight(&mut self, priority: RakPriority) -> u64 {
@@ -397,7 +397,7 @@ impl Session {
         &mut self,
         to_resend: Vec<Sequence24>,
         now: Instant,
-        out: &mut Vec<Datagram>,
+        out: &mut Vec<OutgoingDatagram>,
     ) {
         let mut resent_any = false;
 
@@ -407,7 +407,7 @@ impl Session {
                 tracked.send_time = now;
                 tracked.next_send = now + rto;
                 resent_any = true;
-                out.push(tracked.datagram.clone());
+                out.push(OutgoingDatagram::Shared(tracked.datagram.clone()));
             }
         }
 
@@ -462,7 +462,12 @@ mod tests {
             .build_data_datagram(now)
             .expect("should build a datagram");
 
-        let DatagramPayload::EncapsulatedPackets(pkts) = dgram.payload else {
+        let dgram_ref = match &dgram {
+            OutgoingDatagram::Shared(d) => d.as_ref(),
+            OutgoingDatagram::Owned(d) => d,
+        };
+
+        let DatagramPayload::EncapsulatedPackets(pkts) = &dgram_ref.payload else {
             panic!("expected encapsulated datagram");
         };
 

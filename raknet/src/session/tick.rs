@@ -1,12 +1,10 @@
 use std::time::Instant;
 
-use crate::protocol::datagram::Datagram;
-
-use super::Session;
+use super::{OutgoingDatagram, Session};
 
 impl Session {
     /// Periodic maintenance: prune splits, schedule resends, and emit ACK/NACK datagrams.
-    pub fn on_tick(&mut self, now: Instant) -> Vec<Datagram> {
+    pub fn on_tick(&mut self, now: Instant) -> Vec<OutgoingDatagram> {
         let mut out = Vec::new();
 
         self.process_incoming_acks_naks(now);
@@ -57,11 +55,15 @@ mod tests {
         let mut ack = None;
         let mut nak = None;
         for d in &out {
-            if d.header.flags.contains(DatagramFlags::ACK) {
-                ack = Some(d);
+            let d_ref = match d {
+                OutgoingDatagram::Shared(d) => d.as_ref(),
+                OutgoingDatagram::Owned(d) => d,
+            };
+            if d_ref.header.flags.contains(DatagramFlags::ACK) {
+                ack = Some(d_ref);
             }
-            if d.header.flags.contains(DatagramFlags::NACK) {
-                nak = Some(d);
+            if d_ref.header.flags.contains(DatagramFlags::NACK) {
+                nak = Some(d_ref);
             }
         }
 

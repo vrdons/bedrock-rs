@@ -1,4 +1,4 @@
-cargo build --target x86_64-linux-android
+cargo build --example forwarder --target x86_64-linux-android
 
 waydroid adb connect
 adb push target/x86_64-linux-android/debug/bedrock /data/local/tmp/
