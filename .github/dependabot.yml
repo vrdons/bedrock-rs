@@ -9,3 +9,7 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore"
+    groups:
+      rust-dependencies:
+        patterns:
+          - "*"

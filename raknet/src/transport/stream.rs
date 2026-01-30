@@ -73,6 +73,13 @@ impl Default for RaknetStreamConfig {
         }
     }
 }
+
+impl From<RaknetStreamConfigBuilder> for RaknetStreamConfig {
+    fn from(builder: RaknetStreamConfigBuilder) -> Self {
+        builder.build()
+    }
+}
+
 impl RaknetStreamConfig {
     /// Creates a new [`RaknetStreamConfig`] with default values.
     pub fn new() -> Self {
@@ -136,20 +143,20 @@ impl RaknetStreamConfigBuilder {
     }
 
     /// Sets the MTU size to attempt negotiation with.
-    pub fn mtu(mut self, mtu: impl Into<u16>) -> Self {
-        self.mtu = mtu.into();
+    pub fn mtu(mut self, mtu: u16) -> Self {
+        self.mtu = mtu;
         self
     }
 
     /// Sets the socket receive buffer size.
-    pub fn socket_recv_buffer_size(mut self, size: Option<usize>) -> Self {
-        self.socket_recv_buffer_size = size;
+    pub fn socket_recv_buffer_size(mut self, size: usize) -> Self {
+        self.socket_recv_buffer_size = Some(size);
         self
     }
 
     /// Sets the socket send buffer size.
-    pub fn socket_send_buffer_size(mut self, size: Option<usize>) -> Self {
-        self.socket_send_buffer_size = size;
+    pub fn socket_send_buffer_size(mut self, size: usize) -> Self {
+        self.socket_send_buffer_size = Some(size);
         self
     }
 

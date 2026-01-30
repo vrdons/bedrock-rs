@@ -30,6 +30,7 @@ commit_preprocessors = [
     { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](https://github.com/vrdons/bedrock-multiplayer-test/pull/${2}))" },
 ]
 commit_parsers = [
+    { body = ".*security", group = "Security" },
     { message = "^feat", group = "Features" },
     { message = "^feature", group = "Features" },
     { message = "^fix", group = "Bug Fixes" },
@@ -40,7 +41,6 @@ commit_parsers = [
     { message = "^test", group = "Testing" },
     { message = "^chore\\(release\\): prepare for", skip = true },
     { message = "^chore", group = "Miscellaneous Tasks" },
-    { body = ".*security", group = "Security" },
 
     { message = "^deps|^build", group = "Dependencies" },
     { message = "^Merge pull request", group = "Pull Requests" },

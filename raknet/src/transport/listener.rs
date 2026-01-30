@@ -150,6 +150,12 @@ impl Default for RaknetListenerConfigBuilder {
     }
 }
 
+impl From<RaknetListenerConfigBuilder> for RaknetListenerConfig {
+    fn from(builder: RaknetListenerConfigBuilder) -> Self {
+        builder.build()
+    }
+}
+
 impl RaknetListenerConfigBuilder {
     /// Creates a new [`RaknetListenerConfigBuilder`] with default values.
     pub fn new() -> Self {
@@ -289,10 +295,12 @@ pub struct RaknetListener {
 impl RaknetListener {
     /// Binds a new listener to the specified address using the provided configuration.
     pub async fn bind(config: RaknetListenerConfig) -> std::io::Result<Self> {
-        let addr = config
-            .bind_addr
-            .ok_or_else(|| crate::RaknetError::MissingConfigValue("bind_addr".to_string()))
-            .unwrap();
+        let addr = config.bind_addr.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "bind_addr is required in config",
+            )
+        })?;
         let socket = UdpSocket::bind(addr).await?;
         // if let Some(size) = config.socket_recv_buffer_size {
         //     let _ = socket.set_recv_buffer_size(size);

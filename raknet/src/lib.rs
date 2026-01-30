@@ -27,7 +27,9 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let addr: SocketAddr = "0.0.0.0:19132".parse()?;
-//!     let mut listener = RaknetListener::bind(RaknetListenerConfigBuilder::new().bind_address(addr).build()).await?;
+//!     let mut listener = RaknetListener::bind(RaknetListenerConfigBuilder::new()
+//!         .bind_address(addr)
+//!         .build()).await?;
 //!     while let Some(mut conn) = listener.accept().await {
 //!         tokio::spawn(async move {
 //!             while let Some(msg) = conn.recv().await {
