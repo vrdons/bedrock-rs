@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 thiserror = { workspace = true }
 tokio = { workspace = true }
+rand = { workspace = true }
+bytes = { workspace = true }
+webrtc = { workspace = true }

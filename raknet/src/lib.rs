@@ -1,20 +1,9 @@
-//! # tokio-raknet
 //!
-//! A high-performance, asynchronous implementation of the RakNet protocol written in pure Rust.
-//! Built on top of the [Tokio](https://tokio.rs) runtime, it is designed to provide a modern,
-//! ergonomic API for building robust UDP-based networked applications, games, and services.
-//!
-//! ## Features
-//!
-//! *   **Fully Asynchronous**: Built with `async`/`await` for high concurrency.
-//! *   **Reliability Layers**: Support for Reliable, Unreliable, Ordered, Sequenced, etc.
-//! *   **Fragmentation**: Automatic splitting and reassembly of large packets.
-//! *   **Simple API**: High-level abstraction resembling `TcpStream` but for UDP/RakNet.
 //!
 //! ## Example: Client
 //!
 //! ```rust,no_run
-//! use tokio_raknet::RaknetStream;
+//! use raknet::RaknetStream;
 //! use bytes::Bytes;
 //!
 //! #[tokio::main]
@@ -28,7 +17,7 @@
 //! ## Example: Server
 //!
 //! ```rust,no_run
-//! use tokio_raknet::RaknetListener;
+//! use raknet::RaknetListener;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {

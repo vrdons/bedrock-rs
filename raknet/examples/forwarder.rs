@@ -1,7 +1,7 @@
-use std::error::Error;
+use raknet::transport::{Message, RaknetListener, RaknetStream, stream::RaknetStreamConfigBuilder};
+use std::{env, error::Error};
 use std::net::SocketAddr;
 use tokio::net::lookup_host;
-use raknet::transport::{Message, RaknetListener, RaknetStream};
 use tracing::Level;
 use tracing_subscriber::{filter, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -16,8 +16,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with(filter_layer)
         .init();
 
-    let bind_addr: SocketAddr = "0.0.0.0:19132".parse()?;
-    let target_host: &str = "play.cubecraft.net:19132"; // play.lbsg.net
+    let args: Vec<String> = env::args().collect();
+    let bind_addr: SocketAddr = args.get(1)
+        .map(|s| s.as_str())
+        .unwrap_or("0.0.0.0:19132")
+        .parse()?;
+    let target_host: &str = args.get(2)
+        .map(|s| s.as_str())
+        .unwrap_or("play.cubecraft.net:19132");
 
     tracing::info!("RakNet Forwarder starting...");
     tracing::info!("Listening on: {}", bind_addr);
@@ -51,7 +57,12 @@ async fn handle_connection(
     let remote_addr = addrs.next().ok_or("Failed to resolve target host")?;
 
     tracing::info!("[{}] Connecting to server {}...", client_addr, remote_addr);
-    let mut server = RaknetStream::connect(remote_addr).await?;
+    let mut server = RaknetStream::connect(
+        RaknetStreamConfigBuilder::new()
+            .connect_addr(remote_addr)
+            .build(),
+    )
+    .await?;
     tracing::info!("[{}] Connected to server!", client_addr);
 
     // Split the streams locally to manage concurrent read/writes
@@ -71,11 +82,11 @@ async fn handle_connection(
                         server.send(outbound).await?;
                     }
                     Some(Err(e)) => {
-                        tracing::info!("[{}] Client error: {:?}", client_addr, e);
+                        tracing::warn!("[{}] Client error: {:?}", client_addr, e);
                         break;
                     }
                     None => {
-                        tracing::info!("[{}] Client disconnected", client_addr);
+                        tracing::warn!("[{}] Client disconnected", client_addr);
                         break;
                     }
                 }

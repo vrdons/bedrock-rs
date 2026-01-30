@@ -25,9 +25,11 @@ const TICK_INTERVAL: Duration = Duration::from_millis(20);
 const HANDSHAKE_RETRIES: usize = 3;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_millis(400);
 
-/// Configuration for a `RaknetStream`.
+/// Configuration for [`RaknetStream`].
 #[derive(Debug, Clone)]
 pub struct RaknetStreamConfig {
+    /// The address to connect to.
+    pub connect_addr: Option<SocketAddr>,
     /// MTU size to attempt negotiation with.
     pub mtu: u16,
     /// Optional socket receive buffer size.
@@ -53,8 +55,10 @@ pub struct RaknetStreamConfig {
 }
 
 impl Default for RaknetStreamConfig {
+    /// Default options for [`RaknetStreamConfig`].
     fn default() -> Self {
         Self {
+            connect_addr: None,
             mtu: 1400,
             socket_recv_buffer_size: None,
             socket_send_buffer_size: None,
@@ -66,6 +70,151 @@ impl Default for RaknetStreamConfig {
             reliable_window: constants::MAX_ACK_SEQUENCES as u32,
             max_split_parts: 8192,
             max_concurrent_splits: 4096,
+        }
+    }
+}
+impl RaknetStreamConfig {
+    /// Creates a new [`RaknetStreamConfig`] with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+    /// Creates a builder for [`RaknetStreamConfig`].
+    pub fn builder() -> RaknetStreamConfigBuilder {
+        RaknetStreamConfigBuilder::default()
+    }
+}
+
+/// Configuration builder for [`RaknetStream`].
+#[derive(Debug, Clone)]
+pub struct RaknetStreamConfigBuilder {
+    connect_addr: Option<SocketAddr>,
+    mtu: u16,
+    socket_recv_buffer_size: Option<usize>,
+    socket_send_buffer_size: Option<usize>,
+    connection_timeout: Duration,
+    session_timeout: Duration,
+    max_ordering_channels: usize,
+    ack_queue_capacity: usize,
+    split_timeout: Duration,
+    reliable_window: u32,
+    max_split_parts: u32,
+    max_concurrent_splits: usize,
+}
+
+impl Default for RaknetStreamConfigBuilder {
+    /// Default options for [`RaknetStreamConfig`].
+    fn default() -> Self {
+        let config = RaknetStreamConfig::default();
+        Self {
+            connect_addr: config.connect_addr,
+            mtu: config.mtu,
+            socket_recv_buffer_size: config.socket_recv_buffer_size,
+            socket_send_buffer_size: config.socket_send_buffer_size,
+            connection_timeout: config.connection_timeout,
+            session_timeout: config.session_timeout,
+            max_ordering_channels: config.max_ordering_channels,
+            ack_queue_capacity: config.ack_queue_capacity,
+            split_timeout: config.split_timeout,
+            reliable_window: config.reliable_window,
+            max_split_parts: config.max_split_parts,
+            max_concurrent_splits: config.max_concurrent_splits,
+        }
+    }
+}
+
+impl RaknetStreamConfigBuilder {
+    /// Creates a new [`RaknetStreamConfigBuilder`] with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the address to connect to.
+    pub fn connect_addr(mut self, addr: impl Into<SocketAddr>) -> Self {
+        self.connect_addr = Some(addr.into());
+        self
+    }
+
+    /// Sets the MTU size to attempt negotiation with.
+    pub fn mtu(mut self, mtu: impl Into<u16>) -> Self {
+        self.mtu = mtu.into();
+        self
+    }
+
+    /// Sets the socket receive buffer size.
+    pub fn socket_recv_buffer_size(mut self, size: Option<usize>) -> Self {
+        self.socket_recv_buffer_size = size;
+        self
+    }
+
+    /// Sets the socket send buffer size.
+    pub fn socket_send_buffer_size(mut self, size: Option<usize>) -> Self {
+        self.socket_send_buffer_size = size;
+        self
+    }
+
+    /// Sets the connection timeout duration.
+    pub fn connection_timeout(mut self, timeout: Duration) -> Self {
+        self.connection_timeout = timeout;
+        self
+    }
+
+    /// Sets the session inactivity timeout.
+    pub fn session_timeout(mut self, timeout: Duration) -> Self {
+        self.session_timeout = timeout;
+        self
+    }
+
+    /// Sets the maximum number of ordering channels.
+    pub fn max_ordering_channels(mut self, channels: usize) -> Self {
+        self.max_ordering_channels = channels;
+        self
+    }
+
+    /// Sets the ACK queue capacity.
+    pub fn ack_queue_capacity(mut self, capacity: usize) -> Self {
+        self.ack_queue_capacity = capacity;
+        self
+    }
+
+    /// Sets the timeout for reassembling split packets.
+    pub fn split_timeout(mut self, timeout: Duration) -> Self {
+        self.split_timeout = timeout;
+        self
+    }
+
+    /// Sets the maximum reliable window size.
+    pub fn reliable_window(mut self, window: u32) -> Self {
+        self.reliable_window = window;
+        self
+    }
+
+    /// Sets the maximum number of parts in a split packet.
+    pub fn max_split_parts(mut self, parts: u32) -> Self {
+        self.max_split_parts = parts;
+        self
+    }
+
+    /// Sets the maximum number of concurrent split packets.
+    pub fn max_concurrent_splits(mut self, splits: usize) -> Self {
+        self.max_concurrent_splits = splits;
+        self
+    }
+
+    /// Builds the [`RaknetStreamConfig`] from the builder.
+    pub fn build(self) -> RaknetStreamConfig {
+        RaknetStreamConfig {
+            connect_addr: self.connect_addr,
+            mtu: self.mtu,
+            socket_recv_buffer_size: self.socket_recv_buffer_size,
+            socket_send_buffer_size: self.socket_send_buffer_size,
+            connection_timeout: self.connection_timeout,
+            session_timeout: self.session_timeout,
+            max_ordering_channels: self.max_ordering_channels,
+            ack_queue_capacity: self.ack_queue_capacity,
+            split_timeout: self.split_timeout,
+            reliable_window: self.reliable_window,
+            max_split_parts: self.max_split_parts,
+            max_concurrent_splits: self.max_concurrent_splits,
         }
     }
 }
@@ -97,23 +246,11 @@ impl RaknetStream {
         }
     }
 
-    /// Connect to a RakNet server at the given address using default configuration.
-    pub async fn connect(server: SocketAddr) -> Result<Self, crate::RaknetError> {
-        Self::connect_with(server, RaknetStreamConfig::default()).await
-    }
-
     /// Connect to a RakNet server with a custom configuration.
-    pub async fn connect_with(
-        server: SocketAddr,
-        config: RaknetStreamConfig,
-    ) -> Result<Self, crate::RaknetError> {
-        // if let Some(size) = config.socket_recv_buffer_size {
-        //     let _ = socket.set_recv_buffer_size(size);
-        // }
-        // if let Some(size) = config.socket_send_buffer_size {
-        //     let _ = socket.set_send_buffer_size(size);
-        // }
-
+    pub async fn connect(config: RaknetStreamConfig) -> Result<Self, crate::RaknetError> {
+        let server = config
+            .connect_addr
+            .ok_or_else(|| crate::RaknetError::MissingConfigValue("connect_addr".to_string()))?;
         let bind_addr: SocketAddr = if server.is_ipv4() {
             "0.0.0.0:0".parse().unwrap()
         } else {
@@ -121,6 +258,13 @@ impl RaknetStream {
         };
         let socket = UdpSocket::bind(bind_addr).await?;
         let local = socket.local_addr()?;
+
+        // if let Some(size) = config.socket_recv_buffer_size {
+        //     let _ = socket.set_recv_buffer_size(size);
+        // }
+        // if let Some(size) = config.socket_send_buffer_size {
+        //     let _ = socket.set_send_buffer_size(size);
+        // }
 
         // Perform offline handshake using OpenConnectionRequest1/2.
         let client_guid = client_guid();
