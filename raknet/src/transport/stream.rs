@@ -128,6 +128,7 @@ impl RaknetStreamConfigBuilder {
         Self::default()
     }
 
+    #[must_use]
     /// Sets the address to connect to.
     pub fn connect_addr(mut self, addr: impl Into<SocketAddr>) -> Self {
         self.connect_addr = Some(addr.into());

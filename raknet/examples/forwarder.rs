@@ -1,6 +1,8 @@
-use raknet::transport::{Message, RaknetListener, RaknetStream, stream::RaknetStreamConfigBuilder};
-use std::{env, error::Error};
+use raknet::transport::{
+    Message, RaknetListener, RaknetListenerConfigBuilder, RaknetStream, RaknetStreamConfigBuilder,
+};
 use std::net::SocketAddr;
+use std::{env, error::Error};
 use tokio::net::lookup_host;
 use tracing::Level;
 use tracing_subscriber::{filter, layer::SubscriberExt, util::SubscriberInitExt};
@@ -17,11 +19,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .init();
 
     let args: Vec<String> = env::args().collect();
-    let bind_addr: SocketAddr = args.get(1)
+    let bind_addr: SocketAddr = args
+        .get(1)
         .map(|s| s.as_str())
         .unwrap_or("0.0.0.0:19132")
         .parse()?;
-    let target_host: &str = args.get(2)
+    let target_host: &str = args
+        .get(2)
         .map(|s| s.as_str())
         .unwrap_or("play.cubecraft.net:19132");
 
@@ -29,7 +33,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tracing::info!("Listening on: {}", bind_addr);
     tracing::info!("Forwarding to: {}", target_host);
 
-    let mut listener = RaknetListener::bind(bind_addr).await?;
+    let mut listener = RaknetListener::bind(
+        RaknetListenerConfigBuilder::new()
+            .bind_address(bind_addr)
+            .build(),
+    )
+    .await?;
 
     // Accept only one connection
     if let Some(client_stream) = listener.accept().await {

@@ -3,12 +3,16 @@
 //! ## Example: Client
 //!
 //! ```rust,no_run
-//! use raknet::RaknetStream;
+//! use raknet::{RaknetStream, transport::RaknetStreamConfigBuilder};
 //! use bytes::Bytes;
+//! use std::net::SocketAddr;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let mut client = RaknetStream::connect("127.0.0.1:19132".parse()?).await?;
+//!     let addr: SocketAddr = "127.0.0.1:19132".parse()?;
+//!     let mut client = RaknetStream::connect(RaknetStreamConfigBuilder::new()
+//!            .connect_addr(addr)
+//!            .build()).await?;
 //!     client.send("Hello!").await?;
 //!     Ok(())
 //! }
@@ -17,11 +21,13 @@
 //! ## Example: Server
 //!
 //! ```rust,no_run
-//! use raknet::RaknetListener;
+//! use raknet::{RaknetListener, transport::RaknetListenerConfigBuilder};
+//! use std::net::SocketAddr;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let mut listener = RaknetListener::bind("0.0.0.0:19132".parse()?).await?;
+//!     let addr: SocketAddr = "0.0.0.0:19132".parse()?;
+//!     let mut listener = RaknetListener::bind(RaknetListenerConfigBuilder::new().bind_address(addr).build()).await?;
 //!     while let Some(mut conn) = listener.accept().await {
 //!         tokio::spawn(async move {
 //!             while let Some(msg) = conn.recv().await {
