@@ -12,8 +12,8 @@ use std::task::{Context, Poll};
 
 use crate::protocol::{
     constants::{
-        DEFAULT_UNCONNECTED_MAGIC, MAXIMUM_MTU_SIZE, MINIMUM_MTU_SIZE, RAKNET_PROTOCOL_VERSION,
-        UDP_HEADER_SIZE,
+        DEFAULT_UNCONNECTED_MAGIC, MAX_ACK_SEQUENCES, MAXIMUM_MTU_SIZE, MAXIMUM_ORDERING_CHANNELS,
+        MINIMUM_MTU_SIZE, RAKNET_PROTOCOL_VERSION, UDP_HEADER_SIZE,
     },
     datagram::Datagram,
     packet::RaknetPacket,
@@ -22,8 +22,6 @@ use crate::protocol::{
 use crate::session::manager::{ConnectionState, ManagedSession, SessionConfig, SessionRole};
 
 use super::{OutboundMsg, ReceivedMessage};
-
-use crate::protocol::constants::{self};
 
 const TICK_INTERVAL: Duration = Duration::from_millis(20);
 const HANDSHAKE_RETRIES: usize = 3;
@@ -62,10 +60,10 @@ impl Default for RaknetStreamConfig {
             mtu: 1400,
             connection_timeout: Duration::from_secs(10),
             session_timeout: Duration::from_secs(10),
-            max_ordering_channels: constants::MAXIMUM_ORDERING_CHANNELS as usize,
+            max_ordering_channels: MAXIMUM_ORDERING_CHANNELS as usize,
             ack_queue_capacity: 1024,
             split_timeout: Duration::from_secs(30),
-            reliable_window: constants::MAX_ACK_SEQUENCES as u32,
+            reliable_window: MAX_ACK_SEQUENCES as u32,
             max_split_parts: 8192,
             max_concurrent_splits: 4096,
         }
@@ -819,14 +817,12 @@ async fn flush_built_datagrams(
 #[tracing::instrument(skip(managed, ready), level = "trace")]
 fn notify_client_ready(
     managed: &ManagedSession,
-
     ready: &mut Option<oneshot::Sender<Result<(), crate::RaknetError>>>,
 ) {
-    if managed.is_connected()
-        && let Some(tx) = ready.take()
-    {
-        tracing::trace!("sending ready signal");
-
-        let _ = tx.send(Ok(()));
+    if managed.is_connected() {
+        if let Some(tx) = ready.take() {
+            tracing::trace!("sending ready signal");
+            let _ = tx.send(Ok(()));
+        }
     }
 }

@@ -1,4 +1,8 @@
+//! A Tokio-based RakNet protocol implementation for Rust.
 //!
+//! This crate provides high-level types for building RakNet clients and servers:
+//! - [`RaknetStream`] for client connections
+//! - [`RaknetListener`] for server-side connection acceptance
 //!
 //! ## Example: Client
 //!

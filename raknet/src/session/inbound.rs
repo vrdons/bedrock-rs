@@ -63,11 +63,11 @@ impl Session {
             None
         };
 
-        if let Some(idx) = ridx
-            && self.reliable_tracker.has_seen(idx)
-        {
-            // Duplicate non-split reliable; drop silently.
-            return Ok(());
+        if let Some(idx) = ridx {
+            if self.reliable_tracker.has_seen(idx) {
+                // Duplicate non-split reliable; drop silently.
+                return Ok(());
+            }
         }
 
         // Attempt to add to split assembler (or pass through if not split)
@@ -86,8 +86,10 @@ impl Session {
         // For non-split reliable packets, commit the reliable index now.
         // For split packets, we avoid marking per-part indexes as seen; duplicates
         // are handled by split_assembler itself.
-        if !is_split && let Some(idx) = ridx {
-            self.reliable_tracker.see(idx);
+        if !is_split {
+            if let Some(idx) = ridx {
+                self.reliable_tracker.see(idx);
+            }
         }
 
         let enc = match assembled_opt {
@@ -151,12 +153,13 @@ impl Session {
     fn process_incoming_acks(&mut self, now: Instant) {
         while let Some(range) = self.incoming_acks.pop_front() {
             Self::for_each_sequence_in_range(range, |seq| {
-                if let Some(tracked) = self.sent_datagrams.remove(&seq)
-                    && let crate::protocol::datagram::DatagramPayload::EncapsulatedPackets(_) =
+                if let Some(tracked) = self.sent_datagrams.remove(&seq) {
+                    if let crate::protocol::datagram::DatagramPayload::EncapsulatedPackets(_) =
                         &tracked.datagram.payload
-                {
-                    self.sliding
-                        .on_ack(now, &tracked.datagram, seq, tracked.send_time);
+                    {
+                        self.sliding
+                            .on_ack(now, &tracked.datagram, seq, tracked.send_time);
+                    }
                 }
             });
         }
@@ -165,13 +168,14 @@ impl Session {
     fn process_incoming_naks(&mut self, now: Instant) {
         while let Some(range) = self.incoming_naks.pop_front() {
             Self::for_each_sequence_in_range(range, |seq| {
-                if let Some(mut tracked) = self.sent_datagrams.remove(&seq)
-                    && let crate::protocol::datagram::DatagramPayload::EncapsulatedPackets(_) =
+                if let Some(mut tracked) = self.sent_datagrams.remove(&seq) {
+                    if let crate::protocol::datagram::DatagramPayload::EncapsulatedPackets(_) =
                         &tracked.datagram.payload
-                {
-                    self.sliding.on_nak();
-                    tracked.next_send = now;
-                    self.sent_datagrams.insert(seq, tracked);
+                    {
+                        self.sliding.on_nak();
+                        tracked.next_send = now;
+                        self.sent_datagrams.insert(seq, tracked);
+                    }
                 }
             });
         }

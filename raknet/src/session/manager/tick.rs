@@ -58,13 +58,12 @@ impl ManagedSession {
     }
 
     pub(crate) fn enforce_queue_limit(&mut self) {
-        if let Some(limit) = self.config.max_queued_reliable_bytes
-            && self.queued_reliable_bytes > limit
-        {
-            let _ = self.send_disconnect(DisconnectReason::QueueTooLong);
-
-            self.state = ConnectionState::Closed;
-            self.last_disconnect_reason = Some(DisconnectReason::QueueTooLong);
+        if let Some(limit) = self.config.max_queued_reliable_bytes {
+            if self.queued_reliable_bytes > limit {
+                let _ = self.send_disconnect(DisconnectReason::QueueTooLong);
+                self.state = ConnectionState::Closed;
+                self.last_disconnect_reason = Some(DisconnectReason::QueueTooLong);
+            }
         }
     }
 
