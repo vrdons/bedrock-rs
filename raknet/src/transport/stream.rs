@@ -36,10 +36,6 @@ pub struct RaknetStreamConfig {
     pub connect_addr: SocketAddr,
     /// MTU size to attempt negotiation with.
     pub mtu: u16,
-    /// Optional socket receive buffer size.
-    pub socket_recv_buffer_size: Option<usize>,
-    /// Optional socket send buffer size.
-    pub socket_send_buffer_size: Option<usize>,
     /// Timeout for the initial connection handshake.
     pub connection_timeout: Duration,
     /// Timeout for an active session.
@@ -64,8 +60,6 @@ impl Default for RaknetStreamConfig {
         Self {
             connect_addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 19132)),
             mtu: 1400,
-            socket_recv_buffer_size: None,
-            socket_send_buffer_size: None,
             connection_timeout: Duration::from_secs(10),
             session_timeout: Duration::from_secs(10),
             max_ordering_channels: constants::MAXIMUM_ORDERING_CHANNELS as usize,
@@ -100,8 +94,6 @@ impl RaknetStreamConfig {
 pub struct RaknetStreamConfigBuilder {
     connect_addr: Option<SocketAddr>,
     mtu: u16,
-    socket_recv_buffer_size: Option<usize>,
-    socket_send_buffer_size: Option<usize>,
     connection_timeout: Duration,
     session_timeout: Duration,
     max_ordering_channels: usize,
@@ -119,8 +111,6 @@ impl Default for RaknetStreamConfigBuilder {
         Self {
             connect_addr: None,
             mtu: config.mtu,
-            socket_recv_buffer_size: config.socket_recv_buffer_size,
-            socket_send_buffer_size: config.socket_send_buffer_size,
             connection_timeout: config.connection_timeout,
             session_timeout: config.session_timeout,
             max_ordering_channels: config.max_ordering_channels,
@@ -149,18 +139,6 @@ impl RaknetStreamConfigBuilder {
     /// Sets the MTU size to attempt negotiation with.
     pub fn mtu(mut self, mtu: u16) -> Self {
         self.mtu = mtu;
-        self
-    }
-
-    /// Sets the socket receive buffer size.
-    pub fn socket_recv_buffer_size(mut self, size: usize) -> Self {
-        self.socket_recv_buffer_size = Some(size);
-        self
-    }
-
-    /// Sets the socket send buffer size.
-    pub fn socket_send_buffer_size(mut self, size: usize) -> Self {
-        self.socket_send_buffer_size = Some(size);
         self
     }
 
@@ -221,8 +199,6 @@ impl RaknetStreamConfigBuilder {
         RaknetStreamConfig {
             connect_addr: server,
             mtu: self.mtu,
-            socket_recv_buffer_size: self.socket_recv_buffer_size,
-            socket_send_buffer_size: self.socket_send_buffer_size,
             connection_timeout: self.connection_timeout,
             session_timeout: self.session_timeout,
             max_ordering_channels: self.max_ordering_channels,
@@ -268,13 +244,6 @@ impl RaknetStream {
         let bind_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
         let socket = UdpSocket::bind(bind_addr).await?;
         let local = socket.local_addr()?;
-
-        // if let Some(size) = config.socket_recv_buffer_size {
-        //     let _ = socket.set_recv_buffer_size(size);
-        // }
-        // if let Some(size) = config.socket_send_buffer_size {
-        //     let _ = socket.set_send_buffer_size(size);
-        // }
 
         // Perform offline handshake using OpenConnectionRequest1/2.
         let client_guid = client_guid();

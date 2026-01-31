@@ -37,12 +37,6 @@ pub struct RaknetListenerConfig {
     /// Maximum MTU size to support/advertise.
     pub max_mtu: u16,
 
-    /// Optional socket receive buffer size.
-    pub socket_recv_buffer_size: Option<usize>,
-
-    /// Optional socket send buffer size.
-    pub socket_send_buffer_size: Option<usize>,
-
     /// Timeout duration for inactive sessions.
     pub session_timeout: Duration,
 
@@ -81,8 +75,6 @@ impl Default for RaknetListenerConfig {
             max_connections: 1024,
             max_pending_connections: 1024,
             max_mtu: 1400,
-            socket_recv_buffer_size: None,
-            socket_send_buffer_size: None,
             session_timeout: Duration::from_secs(10),
             session_stale: Duration::from_secs(5),
             max_queued_reliable_bytes: 4 * 1024 * 1024, // 4MB
@@ -116,8 +108,6 @@ pub struct RaknetListenerConfigBuilder {
     max_connections: usize,
     max_pending_connections: usize,
     max_mtu: u16,
-    socket_recv_buffer_size: Option<usize>,
-    socket_send_buffer_size: Option<usize>,
     session_timeout: Duration,
     session_stale: Duration,
     max_queued_reliable_bytes: usize,
@@ -138,8 +128,6 @@ impl Default for RaknetListenerConfigBuilder {
             max_connections: config.max_connections,
             max_pending_connections: config.max_pending_connections,
             max_mtu: config.max_mtu,
-            socket_recv_buffer_size: config.socket_recv_buffer_size,
-            socket_send_buffer_size: config.socket_send_buffer_size,
             session_timeout: config.session_timeout,
             session_stale: config.session_stale,
             max_queued_reliable_bytes: config.max_queued_reliable_bytes,
@@ -187,18 +175,6 @@ impl RaknetListenerConfigBuilder {
     /// Sets the maximum MTU size.
     pub fn max_mtu(mut self, mtu: u16) -> Self {
         self.max_mtu = mtu;
-        self
-    }
-
-    /// Sets the socket receive buffer size.
-    pub fn socket_recv_buffer_size(mut self, size: Option<usize>) -> Self {
-        self.socket_recv_buffer_size = size;
-        self
-    }
-
-    /// Sets the socket send buffer size.
-    pub fn socket_send_buffer_size(mut self, size: Option<usize>) -> Self {
-        self.socket_send_buffer_size = size;
         self
     }
 
@@ -273,8 +249,6 @@ impl RaknetListenerConfigBuilder {
             max_connections: self.max_connections,
             max_pending_connections: self.max_pending_connections,
             max_mtu: self.max_mtu,
-            socket_recv_buffer_size: self.socket_recv_buffer_size,
-            socket_send_buffer_size: self.socket_send_buffer_size,
             session_timeout: self.session_timeout,
             session_stale: self.session_stale,
             max_queued_reliable_bytes: self.max_queued_reliable_bytes,
@@ -304,13 +278,6 @@ impl RaknetListener {
     /// Binds a new listener to the specified address using the provided configuration.
     pub async fn bind(config: RaknetListenerConfig) -> std::io::Result<Self> {
         let socket = UdpSocket::bind(config.bind_addr).await?;
-        // if let Some(size) = config.socket_recv_buffer_size {
-        //     let _ = socket.set_recv_buffer_size(size);
-        // }
-        // if let Some(size) = config.socket_send_buffer_size {
-        //     let _ = socket.set_send_buffer_size(size);
-        // }
-
         let local_addr = socket.local_addr()?;
         let (new_conn_tx, new_conn_rx) = mpsc::channel(32);
         let (outbound_tx, outbound_rx) = mpsc::channel(1024);
