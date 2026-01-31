@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::{Duration, Instant};
 
 use bytes::{BufMut, Bytes, BytesMut};
@@ -6,9 +6,9 @@ use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{self, MissedTickBehavior, timeout};
 
+use futures::{Stream, StreamExt};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use futures::{Stream, StreamExt};
 
 use crate::protocol::{
     constants::{
@@ -33,7 +33,7 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_millis(400);
 #[derive(Debug, Clone)]
 pub struct RaknetStreamConfig {
     /// The address to connect to.
-    pub connect_addr: Option<SocketAddr>,
+    pub connect_addr: SocketAddr,
     /// MTU size to attempt negotiation with.
     pub mtu: u16,
     /// Optional socket receive buffer size.
@@ -62,7 +62,7 @@ impl Default for RaknetStreamConfig {
     /// Default options for [`RaknetStreamConfig`].
     fn default() -> Self {
         Self {
-            connect_addr: None,
+            connect_addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 19132)),
             mtu: 1400,
             socket_recv_buffer_size: None,
             socket_send_buffer_size: None,
@@ -117,7 +117,7 @@ impl Default for RaknetStreamConfigBuilder {
     fn default() -> Self {
         let config = RaknetStreamConfig::default();
         Self {
-            connect_addr: config.connect_addr,
+            connect_addr: None,
             mtu: config.mtu,
             socket_recv_buffer_size: config.socket_recv_buffer_size,
             socket_send_buffer_size: config.socket_send_buffer_size,
@@ -214,8 +214,12 @@ impl RaknetStreamConfigBuilder {
 
     /// Builds the [`RaknetStreamConfig`] from the builder.
     pub fn build(self) -> RaknetStreamConfig {
+        let server = self
+            .connect_addr
+            .ok_or_else(|| crate::RaknetError::MissingConfigValue("connect_addr".to_string()))
+            .unwrap();
         RaknetStreamConfig {
-            connect_addr: self.connect_addr,
+            connect_addr: server,
             mtu: self.mtu,
             socket_recv_buffer_size: self.socket_recv_buffer_size,
             socket_send_buffer_size: self.socket_send_buffer_size,
@@ -260,14 +264,8 @@ impl RaknetStream {
 
     /// Connect to a RakNet server with a custom configuration.
     pub async fn connect(config: RaknetStreamConfig) -> Result<Self, crate::RaknetError> {
-        let server = config
-            .connect_addr
-            .ok_or_else(|| crate::RaknetError::MissingConfigValue("connect_addr".to_string()))?;
-        let bind_addr: SocketAddr = if server.is_ipv4() {
-            "0.0.0.0:0".parse().unwrap()
-        } else {
-            "[::]:0".parse().unwrap()
-        };
+        let server = config.connect_addr;
+        let bind_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
         let socket = UdpSocket::bind(bind_addr).await?;
         let local = socket.local_addr()?;
 

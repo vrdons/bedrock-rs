@@ -2,16 +2,16 @@ mod offline;
 mod online;
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
+use futures::{Stream, StreamExt};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use futures::{Stream, StreamExt};
 
 use crate::protocol::constants::{self, UDP_HEADER_SIZE};
 use crate::transport::listener_conn::SessionState;
@@ -26,7 +26,7 @@ use online::{dispatch_datagram, handle_outgoing_msg, tick_sessions};
 #[derive(Debug, Clone)]
 pub struct RaknetListenerConfig {
     /// Address to start server.
-    pub bind_addr: Option<SocketAddr>,
+    pub bind_addr: SocketAddr,
 
     /// Maximum number of concurrent connections allowed.
     pub max_connections: usize,
@@ -77,7 +77,7 @@ pub struct RaknetListenerConfig {
 impl Default for RaknetListenerConfig {
     fn default() -> Self {
         Self {
-            bind_addr: None,
+            bind_addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 19132)),
             max_connections: 1024,
             max_pending_connections: 1024,
             max_mtu: 1400,
@@ -134,7 +134,7 @@ impl Default for RaknetListenerConfigBuilder {
     fn default() -> Self {
         let config = RaknetListenerConfig::default();
         Self {
-            bind_addr: config.bind_addr,
+            bind_addr: None,
             max_connections: config.max_connections,
             max_pending_connections: config.max_pending_connections,
             max_mtu: config.max_mtu,
@@ -264,8 +264,12 @@ impl RaknetListenerConfigBuilder {
 
     /// Builds the [`RaknetListenerConfig`].
     pub fn build(self) -> RaknetListenerConfig {
+        let addr = self
+            .bind_addr
+            .ok_or_else(|| crate::RaknetError::MissingConfigValue("bind_addr".to_string()))
+            .unwrap();
         RaknetListenerConfig {
-            bind_addr: self.bind_addr,
+            bind_addr: addr,
             max_connections: self.max_connections,
             max_pending_connections: self.max_pending_connections,
             max_mtu: self.max_mtu,
@@ -299,13 +303,7 @@ pub struct RaknetListener {
 impl RaknetListener {
     /// Binds a new listener to the specified address using the provided configuration.
     pub async fn bind(config: RaknetListenerConfig) -> std::io::Result<Self> {
-        let addr = config.bind_addr.ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "bind_addr is required in config",
-            )
-        })?;
-        let socket = UdpSocket::bind(addr).await?;
+        let socket = UdpSocket::bind(config.bind_addr).await?;
         // if let Some(size) = config.socket_recv_buffer_size {
         //     let _ = socket.set_recv_buffer_size(size);
         // }

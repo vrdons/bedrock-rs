@@ -3,6 +3,7 @@ name = "bedrock"
 version = "0.1.0"
 edition = "2024"
 readme = "README.md"
+rust-version = "1.85"
 
 [workspace]
 members = ["raknet", "nethernet"]

@@ -298,7 +298,8 @@ mod tests {
         let ack = out
             .iter()
             .find(|d| {
-                d.as_ref().header
+                d.as_ref()
+                    .header
                     .flags
                     .contains(crate::protocol::constants::DatagramFlags::ACK)
             })
