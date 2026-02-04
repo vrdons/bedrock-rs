@@ -937,12 +937,22 @@ dependencies = [
 
 [[package]]
 name = "nethernet"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
+ "aes",
+ "byteorder",
  "bytes",
+ "cipher",
+ "futures",
+ "hex",
+ "hmac",
  "rand",
+ "sha2",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "webrtc",
 ]
 
@@ -2551,6 +2561,6 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.17"
+version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02aae0f83f69aafc94776e879363e9771d7ecbffe2c7fbb6c14c5e00dfe88439"
+checksum = "1966f8ac2c1f76987d69a74d0e0f929241c10e78136434e3be70ff7f58f64214"

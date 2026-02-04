@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.85"
 
 [dev-dependencies]
-tracing-subscriber = "0.3.22"
+tracing-subscriber = { workspace = true }
 
 
 [dependencies]

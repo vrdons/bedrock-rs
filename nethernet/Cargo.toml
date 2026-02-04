@@ -1,12 +1,24 @@
 [package]
 name = "nethernet"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
+
 [dependencies]
-thiserror = { workspace = true }
 tokio = { workspace = true }
-rand = { workspace = true }
 bytes = { workspace = true }
+thiserror = { workspace = true }
+futures = { workspace = true }
+rand = { workspace = true }
+tracing = { workspace = true }
 webrtc = { workspace = true }
+aes = { workspace = true }
+sha2 = { workspace = true }
+hmac = { workspace = true }
+hex = { workspace = true }
+byteorder = { workspace = true }
+cipher = { workspace = true }
+socket2 = { workspace = true }
