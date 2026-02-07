@@ -45,6 +45,11 @@ impl ManagedSession {
         }
     }
 
+    /// Queues a ConnectedPing control packet and records ping state using the provided time.
+    ///
+    /// The function computes the RakNet timestamp for `now`, enqueues a `ConnectedPing` packet
+    /// with `Unreliable` reliability and `Immediate` priority, sets `last_ping_sent` to `now`,
+    /// and stores the ping nonce derived from the timestamp.
     pub(crate) fn send_connected_ping(&mut self, now: Instant) {
         let timestamp = Self::current_raknet_time(now);
 
@@ -57,6 +62,11 @@ impl ManagedSession {
         self.current_ping_nonce = Some(timestamp.0);
     }
 
+    /// Enforces the configured maximum for queued reliable bytes and closes the session if exceeded.
+    ///
+    /// If a `max_queued_reliable_bytes` limit is configured and the current `queued_reliable_bytes`
+    /// exceeds that limit, the session will be disconnected with reason `QueueTooLong`, the connection
+    /// state will be set to `Closed`, and `last_disconnect_reason` will be recorded.
     pub(crate) fn enforce_queue_limit(&mut self) {
         if let Some(limit) = self.config.max_queued_reliable_bytes {
             if self.queued_reliable_bytes > limit {

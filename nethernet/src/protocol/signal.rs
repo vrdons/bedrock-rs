@@ -16,6 +16,18 @@ pub enum SignalType {
 }
 
 impl SignalType {
+    /// Get the protocol wire string corresponding to the signal type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crate::SignalType;
+    ///
+    /// assert_eq!(SignalType::Offer.as_str(), "CONNECTREQUEST");
+    /// assert_eq!(SignalType::Answer.as_str(), "CONNECTRESPONSE");
+    /// assert_eq!(SignalType::Candidate.as_str(), "CANDIDATEADD");
+    /// assert_eq!(SignalType::Error.as_str(), "CONNECTERROR");
+    /// ```
     pub fn as_str(&self) -> &'static str {
         match self {
             SignalType::Offer => "CONNECTREQUEST",
@@ -29,6 +41,11 @@ impl SignalType {
 impl FromStr for SignalType {
     type Err = NethernetError;
 
+    /// Parses a signal type from its wire string representation.
+    ///
+    /// Recognizes the following exact strings: `"CONNECTREQUEST"`, `"CONNECTRESPONSE"`,
+    /// `"CANDIDATEADD"`, and `"CONNECTERROR"`. For any other input, returns
+    /// `NethernetError::Other` with an "Unknown signal type" message.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "CONNECTREQUEST" => Ok(SignalType::Offer),
@@ -41,6 +58,7 @@ impl FromStr for SignalType {
 }
 
 impl fmt::Display for SignalType {
+    /// Formats the signal type as its canonical protocol string.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }
@@ -60,6 +78,7 @@ pub struct Signal {
 }
 
 impl Signal {
+    /// Constructs a Signal from its components.
     pub fn new(
         signal_type: SignalType,
         connection_id: u64,
@@ -74,22 +93,22 @@ impl Signal {
         }
     }
 
-    /// Creates an offer signal
+    /// Constructs a Signal with type Offer (CONNECTREQUEST) using the given connection ID, SDP payload, and network ID.
     pub fn offer(connection_id: u64, sdp: String, network_id: String) -> Self {
         Self::new(SignalType::Offer, connection_id, sdp, network_id)
     }
 
-    /// Creates an answer signal
+    /// Creates a [`Signal`] with type [`SignalType::Answer`] for the specified connection, SDP payload, and network.
     pub fn answer(connection_id: u64, sdp: String, network_id: String) -> Self {
         Self::new(SignalType::Answer, connection_id, sdp, network_id)
     }
 
-    /// Creates a candidate signal
+    /// Creates a [`Signal`] with type [`SignalType::Candidate`] for the given connection and network.
     pub fn candidate(connection_id: u64, candidate: String, network_id: String) -> Self {
         Self::new(SignalType::Candidate, connection_id, candidate, network_id)
     }
 
-    /// Creates an error signal
+    /// Create a [`Signal`] representing a connection error.
     pub fn error(connection_id: u64, error_code: SignalErrorCode, network_id: String) -> Self {
         Self::new(
             SignalType::Error,
@@ -99,7 +118,13 @@ impl Signal {
         )
     }
 
-    /// Parses a signal from string
+    /// Parses a Signal from a space-separated string and assigns the provided network ID.
+    ///
+    /// The input string must contain exactly three space-separated tokens in the form:
+    /// `TYPE CONNECTION_ID DATA`
+    /// - `TYPE` is the signal type token (e.g., `CONNECTREQUEST`, `CONNECTRESPONSE`, `CANDIDATEADD`, `CONNECTERROR`).
+    /// - `CONNECTION_ID` is a base-10 unsigned integer.
+    /// - `DATA` is the remaining token (signal payload such as SDP or ICE candidate).
     pub fn from_string(s: &str, network_id: String) -> Result<Self, NethernetError> {
         let parts: Vec<&str> = s.splitn(3, ' ').collect();
         if parts.len() != 3 {

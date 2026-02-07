@@ -22,12 +22,18 @@ static ENCRYPTION_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
     key
 });
 
-/// Returns a static reference to the encryption key.
+/// Access the module's static 32-byte encryption key.
+///
+/// The key is computed once at initialization and cached; this function returns
+/// a static reference to that 32-byte key for use in encryption and HMAC.
 pub(crate) fn encryption_key() -> &'static [u8; 32] {
     &ENCRYPTION_KEY
 }
 
-/// Encrypts the content of the bytes using AES-ECB with PKCS7 padding.
+/// Encrypts the given bytes using AES-256 in ECB mode with PKCS#7 padding.
+///
+/// The input is padded to a 16-byte boundary and each block is encrypted in place; the returned
+/// [`Vec<u8>`] contains the ciphertext whose length is a multiple of 16 bytes.
 pub(crate) fn encrypt(data: &[u8]) -> Result<Vec<u8>> {
     let key = encryption_key();
     let cipher = Aes256::new(key.into());
@@ -47,7 +53,9 @@ pub(crate) fn encrypt(data: &[u8]) -> Result<Vec<u8>> {
     Ok(padded)
 }
 
-/// Decrypts the content of the bytes using AES-ECB with PKCS7 padding.
+/// Decrypts a byte slice that was encrypted with AES-256-ECB and PKCS#7 padding.
+///
+/// Returns the decrypted plaintext on success. Returns an error if the input length is zero or not a multiple of 16, or if PKCS#7 padding is invalid.
 pub(crate) fn decrypt(data: &[u8]) -> Result<Vec<u8>> {
     let key = encryption_key();
     let cipher = Aes256::new(key.into());
@@ -87,7 +95,9 @@ pub(crate) fn decrypt(data: &[u8]) -> Result<Vec<u8>> {
     Err(NethernetError::Other("Invalid padding".to_string()))
 }
 
-/// Computes the HMAC-SHA256 checksum for the given data.
+/// Computes an HMAC-SHA256 checksum of the provided data using the module's static encryption key.
+///
+/// Returns a 32-byte HMAC-SHA256 value.
 pub(crate) fn compute_checksum(data: &[u8]) -> [u8; 32] {
     let key = encryption_key();
     let mut mac =
@@ -99,7 +109,11 @@ pub(crate) fn compute_checksum(data: &[u8]) -> [u8; 32] {
     checksum
 }
 
-/// Verifies the HMAC-SHA256 checksum for the given data.
+/// Verifies that `data` matches the given HMAC-SHA256 `expected` checksum using the module's encryption key.
+///
+/// # Returns
+///
+/// `true` if `expected` matches the HMAC-SHA256 of `data`, `false` otherwise.
 pub(crate) fn verify_checksum(data: &[u8], expected: &[u8; 32]) -> bool {
     let key = encryption_key();
     let mut mac =

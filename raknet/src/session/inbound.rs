@@ -39,6 +39,7 @@ impl Session {
         self.incoming_naks.extend(payload.ranges);
     }
 
+    /// Processes a single encapsulated packet: performs deduplication for non-split reliable packets, hands split parts to the assembler, marks reliable indexes when a non-split packet is committed, and dispatches a reassembled or non-split packet for ordered handling or decoding.
     fn handle_encapsulated(
         &mut self,
         enc: EncapsulatedPacket,
@@ -150,6 +151,13 @@ impl Session {
         self.process_incoming_naks(now);
     }
 
+    /// Apply all queued incoming ACK ranges to tracked sent datagrams.
+    ///
+    /// For each acknowledged sequence in the queued ranges, removes the corresponding
+    /// tracked datagram from `sent_datagrams`. If the removed datagram carries an
+    /// `EncapsulatedPackets` payload, informs the sliding-window mechanism via
+    /// `on_ack` using the provided `now`, the datagram, the sequence number, and
+    /// the datagram's original send time.
     fn process_incoming_acks(&mut self, now: Instant) {
         while let Some(range) = self.incoming_acks.pop_front() {
             Self::for_each_sequence_in_range(range, |seq| {
@@ -165,6 +173,11 @@ impl Session {
         }
     }
 
+    /// Applies queued NAK ranges to sent datagrams and schedules retransmission.
+    ///
+    /// For each sequence number in the stored NAK ranges, if a tracked sent datagram exists
+    /// and contains encapsulated packets, this marks a NAK with the sliding-window logic
+    /// and resets that datagram's next-send time to `now` so it will be retransmitted.
     fn process_incoming_naks(&mut self, now: Instant) {
         while let Some(range) = self.incoming_naks.pop_front() {
             Self::for_each_sequence_in_range(range, |seq| {

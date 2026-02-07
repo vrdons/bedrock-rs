@@ -13,6 +13,7 @@ pub struct MessageSegment {
 }
 
 impl MessageSegment {
+    /// Creates a [`MessageSegment`] with the given remaining segment count and payload.
     pub fn new(remaining_segments: u8, data: Bytes) -> Self {
         Self {
             remaining_segments,
@@ -20,7 +21,7 @@ impl MessageSegment {
         }
     }
 
-    /// Encodes the segment to bytes
+    /// Serialize the segment into a byte buffer where the first byte is the remaining segment count and the rest is the payload.
     pub fn encode(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(1 + self.data.len());
         buf.put_u8(self.remaining_segments);
@@ -28,7 +29,7 @@ impl MessageSegment {
         buf.freeze()
     }
 
-    /// Decodes a segment from bytes
+    /// Decode a MessageSegment from a byte slice.
     pub fn decode(data: &[u8]) -> Result<Self> {
         if data.len() < 2 {
             return Err(NethernetError::MessageParse(
@@ -54,6 +55,9 @@ pub struct Message {
 }
 
 impl Message {
+    /// Creates a new, empty Message ready to receive segments.
+    ///
+    /// The returned Message is initialized to expect no segments and has an empty internal buffer.
     pub fn new() -> Self {
         Self {
             expected_segments: 0,
@@ -61,7 +65,9 @@ impl Message {
         }
     }
 
-    /// Adds a segment and checks if the message is complete
+    /// Adds a segment to the current message accumulator and returns the complete message when assembly finishes.
+    ///
+    /// This validates segment sequencing, appends the segment payload to the internal buffer, and resets internal state when a complete message is produced. If a segment is out of the expected order the accumulator is cleared and a `MessageParse` error is returned.
     pub fn add_segment(&mut self, segment: MessageSegment) -> Result<Option<Bytes>> {
         // Set expected_segments if this is the first segment
         if self.expected_segments == 0 && segment.remaining_segments > 0 {
@@ -96,7 +102,13 @@ impl Message {
         }
     }
 
-    /// Splits the message into segments
+    /// Splits a byte buffer into protocol-sized message segments.
+    ///
+    /// For inputs shorter than or equal to MAX_MESSAGE_SIZE this returns a single
+    /// segment with `remaining_segments` equal to 0. For longer inputs the data
+    /// is chunked into segments of at most MAX_MESSAGE_SIZE bytes; the first
+    /// returned segment has `remaining_segments = segment_count - 1` and the last
+    /// has `remaining_segments = 0`.
     pub fn split_into_segments(data: Bytes) -> Result<Vec<MessageSegment>> {
         if data.len() <= MAX_MESSAGE_SIZE {
             return Ok(vec![MessageSegment::new(0, data)]);
@@ -127,6 +139,11 @@ impl Message {
 }
 
 impl Default for Message {
+    /// Creates a new [`Message`] initialized for assembling or emitting segmented messages.
+    ///
+    /// # Returns
+    ///
+    /// A [`Message`] with an empty buffer and no expected segments.
     fn default() -> Self {
         Self::new()
     }

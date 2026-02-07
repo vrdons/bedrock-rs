@@ -342,6 +342,11 @@ impl Session {
         size
     }
 
+    /// Tracks a sent datagram for retransmission and returns a shared outgoing view.
+    ///
+    /// Records the datagram's send time and next retransmit time, notifies the sliding
+    /// window if the datagram contains reliable encapsulated packets, and stores the
+    /// tracked datagram indexed by the provided sequence number.
     fn track_sent_datagram(
         &mut self,
         dgram: Datagram,

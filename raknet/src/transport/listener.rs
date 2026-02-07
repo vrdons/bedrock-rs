@@ -71,6 +71,17 @@ pub struct RaknetListenerConfig {
 }
 
 impl Default for RaknetListenerConfig {
+    /// Creates a RaknetListenerConfig populated with sensible defaults.
+    ///
+    /// Defaults include:
+    /// - bind address 0.0.0.0:19132
+    /// - max connections and pending connections: 1024
+    /// - max MTU: 1400
+    /// - session timeout: 10s, session stale: 5s
+    /// - 4 MiB per-session reliable queue
+    /// - a default MCPE advertisement payload
+    /// - ordering channels and reliable window set from protocol constants
+    /// - split/reassembly limits tuned for typical use (8192 parts, 4096 concurrent)
     fn default() -> Self {
         Self {
             bind_addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 19132)),
@@ -123,6 +134,18 @@ pub struct RaknetListenerConfigBuilder {
 }
 
 impl Default for RaknetListenerConfigBuilder {
+    /// Create a RaknetListenerConfigBuilder populated with the default listener configuration values.
+    ///
+    /// The builder copies defaults from `RaknetListenerConfig::default()` but leaves `bind_addr` as
+    /// `None` so callers must provide an explicit bind address before building.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let b = RaknetListenerConfigBuilder::default();
+    /// assert!(b.bind_addr.is_none());
+    /// assert_eq!(b.max_mtu, RaknetListenerConfig::default().max_mtu);
+    /// ```
     fn default() -> Self {
         let config = RaknetListenerConfig::default();
         Self {
@@ -174,13 +197,30 @@ impl RaknetListenerConfigBuilder {
         self
     }
 
-    /// Sets the maximum MTU size.
+    /// Set the maximum MTU (maximum transmission unit) that the listener will use.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cfg = RaknetListenerConfig::builder()
+    ///     .max_mtu(1400)
+    ///     .build();
+    /// ```
     pub fn max_mtu(mut self, mtu: u16) -> Self {
         self.max_mtu = mtu;
         self
     }
 
-    /// Sets the session inactivity timeout.
+    /// Sets the inactivity timeout used to detect and close idle sessions.
+    ///
+    /// The provided duration is the period of inactivity after which a session is considered timed out.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// let _builder = RaknetListenerConfig::builder().session_timeout(Duration::from_secs(30));
+    /// ```
     pub fn session_timeout(mut self, timeout: Duration) -> Self {
         self.session_timeout = timeout;
         self
@@ -240,7 +280,20 @@ impl RaknetListenerConfigBuilder {
         self
     }
 
-    /// Builds the [`RaknetListenerConfig`].
+    /// Builds a `RaknetListenerConfig` from the builder.
+    ///
+    /// This consumes the builder and returns a concrete `RaknetListenerConfig`.
+    /// Panics if a `bind_addr` was not supplied to the builder (missing config value).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::net::SocketAddr;
+    /// let cfg = crate::transport::listener::RaknetListenerConfigBuilder::new()
+    ///     .bind_address("0.0.0.0:19132".parse::<SocketAddr>().unwrap())
+    ///     .build();
+    /// assert_eq!(cfg.bind_addr.port(), 19132);
+    /// ```
     pub fn build(self) -> RaknetListenerConfig {
         let addr = self
             .bind_addr
@@ -279,7 +332,29 @@ pub struct RaknetListener {
 }
 
 impl RaknetListener {
-    /// Binds a new listener to the specified address using the provided configuration.
+    /// Creates and binds a new RaknetListener using the provided configuration.
+    ///
+    /// The function binds a UDP socket to `config.bind_addr`, starts the background
+    /// listener muxer task, and returns a `RaknetListener` that yields incoming
+    /// `RaknetStream` connections and provides an outbound message channel.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `std::io::Error` if binding the socket or retrieving the local
+    /// address fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use tokio::runtime::Runtime;
+    /// # use raknet::transport::listener::{RaknetListener, RaknetListenerConfig};
+    ///
+    /// let rt = Runtime::new().unwrap();
+    /// let listener = rt.block_on(async {
+    ///     RaknetListener::bind(RaknetListenerConfig::default()).await.unwrap()
+    /// });
+    /// println!("Bound to {}", listener.local_addr());
+    /// ```
     pub async fn bind(config: RaknetListenerConfig) -> std::io::Result<Self> {
         let socket = UdpSocket::bind(config.bind_addr).await?;
         let local_addr = socket.local_addr()?;
@@ -323,7 +398,14 @@ impl RaknetListener {
         }
     }
 
-    /// Gets a copy of the current advertisement data.
+    /// Get a copy of the current advertisement payload.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// // `listener` is a `RaknetListener`.
+    /// let payload: Vec<u8> = listener.get_advertisement();
+    /// ```
     pub fn get_advertisement(&self) -> Vec<u8> {
         self.advertisement
             .read()
@@ -333,6 +415,9 @@ impl RaknetListener {
 }
 
 impl Drop for RaknetListener {
+    /// Cancels the listener's cancellation token, signaling background tasks to stop.
+    ///
+    /// This runs when the listener is dropped to ensure the background muxer and related tasks are terminated.
     fn drop(&mut self) {
         self.cancel_token.cancel();
     }
@@ -341,6 +426,22 @@ impl Drop for RaknetListener {
 impl Stream for RaknetListener {
     type Item = RaknetStream;
 
+    /// Polls the listener for the next incoming RaknetStream connection.
+    ///
+    /// The returned value is `Some(RaknetStream)` when a new peer connection is available,
+    /// `None` when the listener has closed and will yield no more connections, and `Pending`
+    /// when no connection is currently ready.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use futures::StreamExt;
+    /// # async fn example(mut listener: raknet::transport::listener::RaknetListener) {
+    /// if let Some(stream) = listener.next().await {
+    ///     // handle the accepted RaknetStream
+    /// }
+    /// # }
+    /// ```
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.new_connections.poll_recv(cx) {
             Poll::Ready(Some((peer, incoming))) => {
@@ -361,6 +462,39 @@ impl Stream for RaknetListener {
     }
 }
 
+/// Background task that multiplexes UDP I/O, session maintenance, and outgoing messages for a RakNet listener.
+///
+/// This task receives datagrams from the provided UDP socket, dispatches them to session and pending-connection
+/// state, sends outbound messages from the outbound channel, and performs periodic session maintenance.
+/// It terminates when the provided cancellation token is cancelled.
+///
+/// # Examples
+///
+/// ```no_run
+/// use tokio::net::UdpSocket;
+/// use tokio::sync::{mpsc, RwLock};
+/// use tokio_util::sync::CancellationToken;
+/// use std::sync::Arc;
+///
+/// # async fn example() {
+/// let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+/// let config = crate::RaknetListenerConfig::default();
+/// let (new_conn_tx, _new_conn_rx) = mpsc::channel(8);
+/// let (_outbound_tx, outbound_rx) = mpsc::channel(8);
+/// let advertisement = Arc::new(RwLock::new(Vec::new()));
+/// let cancel_token = CancellationToken::new();
+///
+/// // Spawn the listener muxer; it will run until `cancel_token` is cancelled.
+/// tokio::spawn(run_listener_muxer(
+///     socket,
+///     config,
+///     new_conn_tx,
+///     outbound_rx,
+///     advertisement,
+///     cancel_token.clone(),
+/// ));
+/// # }
+/// ```
 async fn run_listener_muxer(
     socket: UdpSocket,
 
