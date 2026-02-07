@@ -1,31 +1,31 @@
 use crate::protocol::constants::MAX_BYTES;
 use std::io::{self, Read, Write};
 
-/// Reads a u8 value from the reader.
+/// Reads a single byte from the given reader.
 pub fn read_u8(r: &mut dyn Read) -> io::Result<u8> {
     let mut buf = [0u8; 1];
     r.read_exact(&mut buf)?;
     Ok(buf[0])
 }
 
-/// Writes a u8 value to the writer.
+/// Writes a single byte to the provided writer.
 pub fn write_u8(w: &mut dyn Write, value: u8) -> io::Result<()> {
     w.write_all(&[value])
 }
 
-/// Reads an i32 value (little-endian) from the reader.
+/// Read a 32-bit little-endian signed integer from a reader.
 pub fn read_i32_le(r: &mut dyn Read) -> io::Result<i32> {
     let mut buf = [0u8; 4];
     r.read_exact(&mut buf)?;
     Ok(i32::from_le_bytes(buf))
 }
 
-/// Writes an i32 value (little-endian) to the writer.
+/// Writes a 32-bit signed integer to the writer in little-endian byte order.
 pub fn write_i32_le(w: &mut dyn Write, value: i32) -> io::Result<()> {
     w.write_all(&value.to_le_bytes())
 }
 
-/// Reads a length-prefixed byte array from the reader.
+/// Reads a length-prefixed byte array using a custom length reader.
 pub fn read_bytes<L: Into<u64>>(
     r: &mut dyn Read,
     read_length: impl Fn(&mut dyn Read) -> io::Result<L>,
@@ -54,12 +54,12 @@ pub fn read_bytes<L: Into<u64>>(
     Ok(buf)
 }
 
-/// Reads a u8-prefixed byte array.
+/// Reads a length-prefixed byte array where the length prefix is a `u8`.
 pub fn read_bytes_u8(r: &mut dyn Read) -> io::Result<Vec<u8>> {
     read_bytes(r, |r| read_u8(r))
 }
 
-/// Reads a u32-prefixed byte array (little-endian).
+/// Reads a length-prefixed byte array where the length is encoded as a 32-bit little-endian integer.
 pub fn read_bytes_u32(r: &mut dyn Read) -> io::Result<Vec<u8>> {
     use super::U32LE;
     let length = U32LE::read(r)?.0;
@@ -69,7 +69,7 @@ pub fn read_bytes_u32(r: &mut dyn Read) -> io::Result<Vec<u8>> {
     read_bytes(r, |_| Ok(length))
 }
 
-/// Writes a length-prefixed byte array to the writer.
+/// Writes `data` prefixed by its length using the provided `write_length` closure.
 pub fn write_bytes<L: TryFrom<usize>>(
     w: &mut dyn Write,
     data: &[u8],
@@ -99,12 +99,12 @@ where
     Ok(())
 }
 
-/// Writes a u8-prefixed byte array.
+/// Writes a length-prefixed byte array using a single-byte (u8) length prefix.
 pub fn write_bytes_u8(w: &mut dyn Write, data: &[u8]) -> io::Result<()> {
     write_bytes(w, data, |w, len: u8| write_u8(w, len))
 }
 
-/// Writes a u32-prefixed byte array (little-endian).
+/// Writes a little-endian u32 length prefix followed by the provided byte slice.
 pub fn write_bytes_u32(w: &mut dyn Write, data: &[u8]) -> io::Result<()> {
     use super::U32LE;
     write_bytes(w, data, |w, len: u32| U32LE(len).write(w))

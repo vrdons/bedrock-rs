@@ -17,17 +17,23 @@ pub struct ResponsePacket {
 }
 
 impl ResponsePacket {
-    /// Creates a new ResponsePacket with the given application data.
+    /// Create a ResponsePacket containing the provided application data.
     pub fn new(application_data: Vec<u8>) -> Self {
         Self { application_data }
     }
 }
 
 impl Packet for ResponsePacket {
+    /// Provides the packet identifier for a discovery response packet.
+    ///
+    /// # Returns
+    ///
+    /// The packet identifier value [`ID_RESPONSE_PACKET`].
     fn id(&self) -> u16 {
         ID_RESPONSE_PACKET
     }
 
+    /// Read hex-encoded application data from `r` and store the decoded bytes in `self.application_data`.
     fn read(&mut self, r: &mut dyn Read) -> Result<()> {
         // Read hex-encoded data
         let hex_data = read_bytes_u32(r)?;
@@ -39,6 +45,7 @@ impl Packet for ResponsePacket {
         Ok(())
     }
 
+    /// Writes the packet's application_data as a hex-encoded byte sequence (prefixed with a 32-bit length) to the provided writer.
     fn write(&self, w: &mut dyn Write) -> Result<()> {
         // Encode to hex
         let hex_encoded = hex::encode(&self.application_data);
@@ -46,6 +53,7 @@ impl Packet for ResponsePacket {
         Ok(())
     }
 
+    /// Exposes the receiver as a `dyn Any` so callers can perform runtime downcasting.
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

@@ -1,7 +1,6 @@
 //! WebRTC negotiation messages.
 //!
 //! These messages are sent during WebRTC connection establishment.
-//! Format: `MESSAGETYPE CONNECTIONID DATA`
 
 use super::error::ConnectError;
 use crate::error::{NethernetError, Result};
@@ -33,9 +32,15 @@ pub enum NegotiationMessage {
 }
 
 impl NegotiationMessage {
-    /// Parses a negotiation message from string format.
+    /// Parse a negotiation message from its wire-format string.
     ///
-    /// Format: `MESSAGETYPE CONNECTIONID DATA`
+    /// The expected wire format is:
+    /// `MESSAGETYPE CONNECTIONID DATA`
+    /// where `DATA` is the payload specific to the message type:
+    /// - `CONNECTREQUEST` — SDP offer
+    /// - `CONNECTRESPONSE` — SDP answer
+    /// - `CANDIDATEADD` — ICE candidate
+    /// - `CONNECTERROR` — numeric error code
     pub fn parse(s: &str) -> Result<Self> {
         let parts: Vec<&str> = s.splitn(3, ' ').collect();
         if parts.len() < 2 {
@@ -102,7 +107,7 @@ impl NegotiationMessage {
         }
     }
 
-    /// Returns the connection ID of the message.
+    /// Get the connection identifier associated with the message.
     pub fn connection_id(&self) -> u64 {
         match self {
             Self::ConnectRequest { connection_id, .. }
@@ -112,7 +117,7 @@ impl NegotiationMessage {
         }
     }
 
-    /// Returns the message type as a string.
+    /// Return the canonical message type name for this negotiation message.
     pub fn message_type(&self) -> &'static str {
         match self {
             Self::ConnectRequest { .. } => "CONNECTREQUEST",

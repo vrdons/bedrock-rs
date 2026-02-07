@@ -30,7 +30,10 @@ pub struct NethernetListener<S: Signaling> {
 }
 
 impl<S: Signaling + 'static> NethernetListener<S> {
-    /// Creates a new listener
+    /// Create a new [`NethernetListener`] bound to the given local address using the provided signaling implementation.
+    ///
+    /// The returned listener is ready to accept inbound WebRTC sessions. It initializes internal queues and dispatch
+    /// structures, and spawns a background task to process signaling events; dropping the listener cancels that task.
     pub async fn bind(signaling: S, local_addr: SocketAddr) -> Result<Self> {
         let signaling = Arc::new(signaling);
         let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
@@ -254,7 +257,17 @@ impl<S: Signaling + 'static> NethernetListener<S> {
         Ok(())
     }
 
-    /// Accepts a new connection
+    /// Waits for and returns the next inbound session.
+    /// 
+    /// # Examples
+    ///
+    /// ```
+    /// # use std::sync::Arc;
+    /// # tokio_test::block_on(async {
+    /// // `listener` must be a previously bound `NethernetListener`.
+    /// let session: Arc<nethernet::transport::session::Session> = listener.accept().await.unwrap();
+    /// # });
+    /// ```
     pub async fn accept(&self) -> Result<Arc<Session>> {
         let mut incoming = self.incoming.lock().await;
         incoming
@@ -263,13 +276,14 @@ impl<S: Signaling + 'static> NethernetListener<S> {
             .ok_or_else(|| NethernetError::ConnectionClosed)
     }
 
-    /// Returns the local address
+    /// Local socket address that this listener is bound to.
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
 }
 
 impl<S: Signaling> Drop for NethernetListener<S> {
+    /// Cancels the listener's shutdown token to stop the background signal-handling task.
     fn drop(&mut self) {
         self.cancel_token.cancel();
     }
@@ -278,6 +292,20 @@ impl<S: Signaling> Drop for NethernetListener<S> {
 impl<S: Signaling + 'static> Stream for NethernetListener<S> {
     type Item = Arc<Session>;
 
+    /// Polls the listener for the next inbound session, returning Pending if the internal queue lock is contended.
+    ///
+    /// This attempts to acquire the internal incoming-session mutex without waiting; if the lock is held by
+    /// another task, the method returns [`Poll::Pending`]. When the lock is acquired, it delegates to the
+    /// inner receiver's poll to produce the next [`Arc<Session>`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use futures::StreamExt;
+    /// # async fn _example(mut s: impl futures::Stream<Item = std::sync::Arc<crate::Session>> + Unpin) {
+    /// let _next = s.next().await; // awaits the next inbound session
+    /// # }
+    /// ```
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut incoming = match self.incoming.try_lock() {
             Ok(guard) => guard,

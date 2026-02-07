@@ -5,12 +5,16 @@ use std::io::{self, Read, Write};
 pub struct U16LE(pub u16);
 
 impl U16LE {
+    /// Reads a little-endian 16-bit unsigned integer from the given reader.
+    ///
+    /// On success returns a `U16LE` wrapping the decoded `u16`. Propagates any I/O error encountered while reading.
     pub fn read<R: Read + ?Sized>(r: &mut R) -> io::Result<Self> {
         let mut buf = [0u8; 2];
         r.read_exact(&mut buf)?;
         Ok(U16LE(u16::from_le_bytes(buf)))
     }
 
+    /// Writes the wrapped integer to the provided writer in little-endian byte order.
     pub fn write<W: Write + ?Sized>(&self, w: &mut W) -> io::Result<()> {
         w.write_all(&self.0.to_le_bytes())
     }
@@ -21,12 +25,18 @@ impl U16LE {
 pub struct U32LE(pub u32);
 
 impl U32LE {
+    /// Reads a 32-bit little-endian unsigned integer from a reader.
+    ///
+    /// # Returns
+    ///
+    /// [`U32LE`] containing the decoded little-endian [`u32`] value.
     pub fn read<R: Read + ?Sized>(r: &mut R) -> io::Result<Self> {
         let mut buf = [0u8; 4];
         r.read_exact(&mut buf)?;
         Ok(U32LE(u32::from_le_bytes(buf)))
     }
 
+    /// Writes the wrapped integer to the provided writer in little-endian byte order.
     pub fn write<W: Write + ?Sized>(&self, w: &mut W) -> io::Result<()> {
         w.write_all(&self.0.to_le_bytes())
     }
@@ -37,12 +47,15 @@ impl U32LE {
 pub struct U64LE(pub u64);
 
 impl U64LE {
+    /// Reads a little-endian 64-bit unsigned integer from a reader.
+    ///
     pub fn read<R: Read + ?Sized>(r: &mut R) -> io::Result<Self> {
         let mut buf = [0u8; 8];
         r.read_exact(&mut buf)?;
         Ok(U64LE(u64::from_le_bytes(buf)))
     }
 
+    /// Writes the wrapped integer to the provided writer in little-endian byte order.
     pub fn write<W: Write + ?Sized>(&self, w: &mut W) -> io::Result<()> {
         w.write_all(&self.0.to_le_bytes())
     }

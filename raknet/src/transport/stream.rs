@@ -55,7 +55,7 @@ pub struct RaknetStreamConfig {
 }
 
 impl Default for RaknetStreamConfig {
-    /// Default options for [`RaknetStreamConfig`].
+    /// Construct a [`RaknetStreamConfig`] populated with the library's default values.
     fn default() -> Self {
         Self {
             connect_addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 19132)),
@@ -105,7 +105,7 @@ pub struct RaknetStreamConfigBuilder {
 }
 
 impl Default for RaknetStreamConfigBuilder {
-    /// Default options for [`RaknetStreamConfig`].
+    /// Creates a [`RaknetStreamConfigBuilder`] pre-populated with the library's default RakNet stream settings.
     fn default() -> Self {
         let config = RaknetStreamConfig::default();
         Self {
@@ -136,13 +136,17 @@ impl RaknetStreamConfigBuilder {
         self
     }
 
-    /// Sets the MTU size to attempt negotiation with.
+    /// Set the MTU (maximum transmission unit), in bytes, to propose during the connection handshake.
+    ///
+    /// The specified value is used when negotiating packet fragmentation and framing with the remote peer.
     pub fn mtu(mut self, mtu: u16) -> Self {
         self.mtu = mtu;
         self
     }
 
-    /// Sets the connection timeout duration.
+    /// Set the initial handshake timeout used when attempting to establish a connection.
+    ///
+    /// Returns the builder with the updated timeout.
     pub fn connection_timeout(mut self, timeout: Duration) -> Self {
         self.connection_timeout = timeout;
         self
@@ -190,7 +194,11 @@ impl RaknetStreamConfigBuilder {
         self
     }
 
-    /// Builds the [`RaknetStreamConfig`] from the builder.
+    /// Constructs a `RaknetStreamConfig` from this builder.
+    ///
+    /// The resulting config copies all tunable fields from the builder. The builder must have
+    /// a `connect_addr` set prior to calling this method; the function will panic if `connect_addr`
+    /// is missing.
     pub fn build(self) -> RaknetStreamConfig {
         let server = self
             .connect_addr
@@ -244,7 +252,9 @@ impl RaknetStream {
         }
     }
 
-    /// Connect to a RakNet server with a custom configuration.
+    /// Establishes a Raknet connection to the configured server and prepares a stream for sending and receiving messages.
+    ///
+    /// This performs the offline handshake (negotiating MTU and server GUID), spawns the background client muxer task, and returns a ready-to-use RaknetStream that delivers inbound messages and accepts outbound messages via its channels.
     pub async fn connect(config: RaknetStreamConfig) -> Result<Self, crate::RaknetError> {
         let server = config.connect_addr;
         let bind_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
@@ -316,6 +326,14 @@ impl RaknetStream {
         self.next().await
     }
 
+    /// Send a message to the connected peer.
+    ///
+    /// Empty messages are ignored; non-empty messages are packaged as a `RaknetPacket::UserData`
+    /// and forwarded to the muxer's outbound channel for delivery.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, `RaknetError::ConnectionClosed` if the outbound channel is closed.
     pub async fn send(&self, msg: impl Into<super::Message>) -> Result<(), crate::RaknetError> {
         let msg = msg.into();
         let bytes = msg.buffer;
@@ -373,6 +391,7 @@ struct ClientMuxerContext {
     cancel_token: CancellationToken,
 }
 
+/// Runs the background muxer loop that manages a client-side RakNet session over a UDP socket.
 #[tracing::instrument(skip(socket, context), fields(server = %context.server, mtu = context.config.mtu), level = "debug")]
 async fn run_client_muxer(socket: UdpSocket, mut context: ClientMuxerContext) {
     let mut buf = vec![0u8; context.config.mtu as usize + UDP_HEADER_SIZE + 64];
@@ -838,6 +857,7 @@ async fn flush_built_datagrams(
     // Delivery of any unblocked packets happens via drain_ready_to_app() at call sites.
 }
 
+/// Signal readiness to the connector once the managed session is connected.
 #[tracing::instrument(skip(managed, ready), level = "trace")]
 fn notify_client_ready(
     managed: &ManagedSession,

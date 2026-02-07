@@ -36,7 +36,19 @@ pub struct ServerData {
 }
 
 impl ServerData {
-    /// Creates a new ServerData with default values.
+    /// Constructs a ServerData for the given server and level names using sensible defaults.
+    ///
+    /// server_name: the server owner or player name.
+    /// level_name: the world or level name.
+    ///
+    /// Defaults:
+    /// - game_type = 0 (Survival)
+    /// - player_count = 1
+    /// - max_player_count = 8
+    /// - editor_world = false
+    /// - hardcore = false
+    /// - transport_layer = 2 (NetherNet)
+    /// - connection_type = 4 (LAN)
     pub fn new(server_name: String, level_name: String) -> Self {
         Self {
             server_name,
@@ -51,7 +63,11 @@ impl ServerData {
         }
     }
 
-    /// Encodes ServerData to binary format.
+    /// Encode the ServerData into the binary format used for discovery ResponsePacket.ApplicationData.
+    ///
+    /// Returns a vector of bytes on success or a NethernetError if encoding fails (for example,
+    /// if a field value would overflow its encoded form or an I/O write fails).
+    ///
     pub fn marshal(&self) -> Result<Vec<u8>> {
         // Validate fields that will be shifted to prevent overflow
         if self.game_type >= 128 {
@@ -102,7 +118,13 @@ impl ServerData {
         Ok(buf)
     }
 
-    /// Decodes ServerData from binary format.
+    /// Decode a ServerData value from its binary representation.
+    ///
+    /// The function verifies the embedded version, reads each field in the expected
+    /// order (version, u8-prefixed server and level names, game type, player counts,
+    /// booleans, transport layer, connection type), validates UTF-8 for string
+    /// fields, and ensures no unread bytes remain. On success returns a populated
+    /// ServerData; on failure returns a NethernetError describing the problem.
     pub fn unmarshal(data: &[u8]) -> Result<Self> {
         let mut cursor = Cursor::new(data);
 
