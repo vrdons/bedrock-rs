@@ -4,7 +4,9 @@ use std::time::{Duration, Instant};
 use bytes::{BufMut, Bytes, BytesMut};
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
 use tokio::time::{self, MissedTickBehavior, timeout};
+use tokio_util::sync::CancellationToken;
 
 use futures::{Stream, StreamExt};
 use std::pin::Pin;
@@ -218,6 +220,8 @@ pub struct RaknetStream {
     peer: SocketAddr,
     incoming: mpsc::Receiver<Result<ReceivedMessage, crate::RaknetError>>,
     outbound_tx: mpsc::Sender<OutboundMsg>,
+    cancel_token: CancellationToken,
+    _muxer_task: Option<JoinHandle<()>>,
 }
 
 impl RaknetStream {
@@ -227,12 +231,16 @@ impl RaknetStream {
         peer: SocketAddr,
         incoming: mpsc::Receiver<Result<ReceivedMessage, crate::RaknetError>>,
         outbound_tx: mpsc::Sender<OutboundMsg>,
+        cancel_token: CancellationToken,
+        muxer_task: Option<JoinHandle<()>>,
     ) -> Self {
         Self {
             local,
             peer,
             incoming,
             outbound_tx,
+            cancel_token,
+            _muxer_task: muxer_task,
         }
     }
 
@@ -257,6 +265,8 @@ impl RaknetStream {
             mpsc::channel::<Result<ReceivedMessage, crate::RaknetError>>(128);
         let (ready_tx, ready_rx) = oneshot::channel();
 
+        let cancel_token = CancellationToken::new();
+
         let context = ClientMuxerContext {
             server,
             server_guid: handshake.server_guid,
@@ -266,9 +276,10 @@ impl RaknetStream {
             to_app: to_app_tx,
             ready: ready_tx,
             config,
+            cancel_token: cancel_token.clone(),
         };
 
-        tokio::spawn(run_client_muxer(socket, context));
+        let muxer_task = tokio::spawn(run_client_muxer(socket, context));
 
         match ready_rx.await {
             Ok(Ok(())) => Ok(Self {
@@ -276,6 +287,8 @@ impl RaknetStream {
                 peer: server,
                 incoming: to_app_rx,
                 outbound_tx,
+                cancel_token,
+                _muxer_task: Some(muxer_task),
             }),
             Ok(Err(e)) => Err(e),
             Err(_) => Err(crate::RaknetError::ConnectionAborted),
@@ -325,6 +338,12 @@ impl RaknetStream {
     }
 }
 
+impl Drop for RaknetStream {
+    fn drop(&mut self) {
+        self.cancel_token.cancel();
+    }
+}
+
 impl Stream for RaknetStream {
     type Item = Result<ReceivedMessage, crate::RaknetError>;
 
@@ -351,6 +370,7 @@ struct ClientMuxerContext {
     to_app: mpsc::Sender<Result<ReceivedMessage, crate::RaknetError>>,
     ready: oneshot::Sender<Result<(), crate::RaknetError>>,
     config: RaknetStreamConfig,
+    cancel_token: CancellationToken,
 }
 
 #[tracing::instrument(skip(socket, context), fields(server = %context.server, mtu = context.config.mtu), level = "debug")]
@@ -388,6 +408,10 @@ async fn run_client_muxer(socket: UdpSocket, mut context: ClientMuxerContext) {
 
     loop {
         tokio::select! {
+            _ = context.cancel_token.cancelled() => {
+                tracing::debug!("client muxer cancelled");
+                break;
+            }
             res = socket.recv_from(&mut buf) => {
                 let (len, peer) = match res {
                     Ok(v) => v,

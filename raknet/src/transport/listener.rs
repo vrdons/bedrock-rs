@@ -8,6 +8,8 @@ use std::time::Duration;
 
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use futures::{Stream, StreamExt};
 use std::pin::Pin;
@@ -272,6 +274,8 @@ pub struct RaknetListener {
     )>,
     outbound_tx: mpsc::Sender<super::OutboundMsg>,
     advertisement: Arc<RwLock<Vec<u8>>>,
+    cancel_token: CancellationToken,
+    _muxer_task: JoinHandle<()>,
 }
 
 impl RaknetListener {
@@ -282,13 +286,15 @@ impl RaknetListener {
         let (new_conn_tx, new_conn_rx) = mpsc::channel(32);
         let (outbound_tx, outbound_rx) = mpsc::channel(1024);
         let advertisement = Arc::new(RwLock::new(config.advertisement.clone()));
+        let cancel_token = CancellationToken::new();
 
-        tokio::spawn(run_listener_muxer(
+        let muxer_task = tokio::spawn(run_listener_muxer(
             socket,
             config,
             new_conn_tx,
             outbound_rx,
             advertisement.clone(),
+            cancel_token.clone(),
         ));
 
         Ok(Self {
@@ -296,6 +302,8 @@ impl RaknetListener {
             new_connections: new_conn_rx,
             outbound_tx,
             advertisement,
+            cancel_token,
+            _muxer_task: muxer_task,
         })
     }
 
@@ -324,17 +332,29 @@ impl RaknetListener {
     }
 }
 
+impl Drop for RaknetListener {
+    fn drop(&mut self) {
+        self.cancel_token.cancel();
+    }
+}
+
 impl Stream for RaknetListener {
     type Item = RaknetStream;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.new_connections.poll_recv(cx) {
-            Poll::Ready(Some((peer, incoming))) => Poll::Ready(Some(RaknetStream::new(
-                self.local_addr,
-                peer,
-                incoming,
-                self.outbound_tx.clone(),
-            ))),
+            Poll::Ready(Some((peer, incoming))) => {
+                // Each connection gets a child token so closing one stream doesn't cancel siblings
+                // or the listener, while the listener can still cancel all children via the parent token
+                Poll::Ready(Some(RaknetStream::new(
+                    self.local_addr,
+                    peer,
+                    incoming,
+                    self.outbound_tx.clone(),
+                    self.cancel_token.child_token(),
+                    None,
+                )))
+            }
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,
         }
@@ -354,6 +374,8 @@ async fn run_listener_muxer(
     mut outbound_rx: mpsc::Receiver<super::OutboundMsg>,
 
     advertisement: Arc<RwLock<Vec<u8>>>,
+
+    cancel_token: CancellationToken,
 ) {
     // Allocate a receive buffer large enough to avoid OS "message too long" errors even if a peer
     // sends a slightly larger probe than our configured MTU.
@@ -364,6 +386,10 @@ async fn run_listener_muxer(
 
     loop {
         tokio::select! {
+            _ = cancel_token.cancelled() => {
+                tracing::debug!("listener muxer cancelled");
+                break;
+            }
             res = socket.recv_from(&mut buf) => {
                 match res  {
                     Ok((len, peer)) => {
