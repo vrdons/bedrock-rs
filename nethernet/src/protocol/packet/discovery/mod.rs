@@ -20,10 +20,6 @@ mod server_data;
 
 pub use message::MessagePacket;
 pub use packet::{Header, Packet, marshal, unmarshal};
-pub use packet::{ID_MESSAGE_PACKET, ID_REQUEST_PACKET, ID_RESPONSE_PACKET};
 pub use request::RequestPacket;
 pub use response::ResponsePacket;
 pub use server_data::ServerData;
-
-/// Default LAN discovery port
-pub const LAN_DISCOVERY_PORT: u16 = 7551;

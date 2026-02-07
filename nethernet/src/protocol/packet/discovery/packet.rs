@@ -3,13 +3,9 @@
 use super::crypto::{compute_checksum, decrypt, encrypt, verify_checksum};
 use super::{MessagePacket, RequestPacket, ResponsePacket};
 use crate::error::{NethernetError, Result};
+use crate::protocol::constants::{ID_MESSAGE_PACKET, ID_REQUEST_PACKET, ID_RESPONSE_PACKET};
 use crate::protocol::types::{U16LE, U64LE};
 use std::io::{Cursor, Read, Write};
-
-/// Packet IDs for discovery packets.
-pub const ID_REQUEST_PACKET: u16 = 0x00;
-pub const ID_RESPONSE_PACKET: u16 = 0x01;
-pub const ID_MESSAGE_PACKET: u16 = 0x02;
 
 /// Trait for discovery packets used in LAN discovery.
 pub trait Packet: Send + Sync {

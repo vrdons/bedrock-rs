@@ -2,7 +2,7 @@
 
 /// Default UDP port used for LAN discovery.
 /// Servers should listen for RequestPackets on this port.
-pub const DEFAULT_PORT: u16 = 7551;
+pub const LAN_DISCOVERY_PORT: u16 = 7551;
 
 /// Packet IDs
 pub const ID_REQUEST_PACKET: u16 = 0;

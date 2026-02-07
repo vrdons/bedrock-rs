@@ -1,6 +1,5 @@
 use crate::error::{NethernetError, Result};
-use crate::protocol::Signal;
-use crate::protocol::constants::DEFAULT_PORT;
+use crate::protocol::{Signal, constants};
 use crate::protocol::packet::discovery::{
     self, MessagePacket, RequestPacket, ResponsePacket, ServerData,
 };
@@ -46,8 +45,8 @@ impl LanSignaling {
         let (signal_tx, _signal_rx) = broadcast::channel(100);
 
         // If not binding to DEFAULT_PORT, enable broadcast to DEFAULT_PORT
-        let broadcast_addr = if bind_addr.port() != DEFAULT_PORT {
-            Some(SocketAddr::new(Ipv4Addr::BROADCAST.into(), DEFAULT_PORT))
+        let broadcast_addr = if bind_addr.port() != constants::LAN_DISCOVERY_PORT {
+            Some(SocketAddr::new(Ipv4Addr::BROADCAST.into(), constants::LAN_DISCOVERY_PORT))
         } else {
             None
         };
@@ -199,7 +198,7 @@ impl LanSignaling {
         }
 
         match packet.id() {
-            discovery::ID_REQUEST_PACKET => {
+            constants::ID_REQUEST_PACKET => {
                 tracing::info!("Received discovery REQUEST from {} (network_id: {})", addr, sender_id);
                 
                 // Request packet - send response if we have server data
@@ -216,7 +215,7 @@ impl LanSignaling {
                     tracing::warn!("No server data configured - cannot respond to discovery request from {}", addr);
                 }
             }
-            discovery::ID_RESPONSE_PACKET => {
+            constants::ID_RESPONSE_PACKET => {
                 // Response packet - parse and store server data
                 let response = packet
                     .as_any()
@@ -234,7 +233,7 @@ impl LanSignaling {
                         .insert(sender_id, server_info);
                 }
             }
-            discovery::ID_MESSAGE_PACKET => {
+            constants::ID_MESSAGE_PACKET => {
                 // Message packet - parse signaling data
                 let message = packet
                     .as_any()

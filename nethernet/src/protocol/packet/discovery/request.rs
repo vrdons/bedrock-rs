@@ -3,9 +3,10 @@
 //! Sent by clients to discover servers on the same network using the
 //! broadcast address on port 7551.
 
-use super::packet::{ID_REQUEST_PACKET, Packet};
+use super::packet::{Packet};
 use crate::error::Result;
 use std::io::{Read, Write};
+use crate::protocol::constants::{ ID_REQUEST_PACKET};
 
 /// RequestPacket is sent by clients to discover servers on LAN.
 /// It does not contain any additional data beyond the header.
