@@ -1,19 +1,21 @@
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::{Duration, Instant};
 
 use bytes::{BufMut, Bytes, BytesMut};
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
 use tokio::time::{self, MissedTickBehavior, timeout};
+use tokio_util::sync::CancellationToken;
 
+use futures::{Stream, StreamExt};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use futures::{Stream, StreamExt};
 
 use crate::protocol::{
     constants::{
-        DEFAULT_UNCONNECTED_MAGIC, MAXIMUM_MTU_SIZE, MINIMUM_MTU_SIZE, RAKNET_PROTOCOL_VERSION,
-        UDP_HEADER_SIZE,
+        DEFAULT_UNCONNECTED_MAGIC, MAX_ACK_SEQUENCES, MAXIMUM_MTU_SIZE, MAXIMUM_ORDERING_CHANNELS,
+        MINIMUM_MTU_SIZE, RAKNET_PROTOCOL_VERSION, UDP_HEADER_SIZE,
     },
     datagram::Datagram,
     packet::RaknetPacket,
@@ -23,8 +25,6 @@ use crate::session::manager::{ConnectionState, ManagedSession, SessionConfig, Se
 
 use super::{OutboundMsg, ReceivedMessage};
 
-use crate::protocol::constants::{self};
-
 const TICK_INTERVAL: Duration = Duration::from_millis(20);
 const HANDSHAKE_RETRIES: usize = 3;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_millis(400);
@@ -33,13 +33,9 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_millis(400);
 #[derive(Debug, Clone)]
 pub struct RaknetStreamConfig {
     /// The address to connect to.
-    pub connect_addr: Option<SocketAddr>,
+    pub connect_addr: SocketAddr,
     /// MTU size to attempt negotiation with.
     pub mtu: u16,
-    /// Optional socket receive buffer size.
-    pub socket_recv_buffer_size: Option<usize>,
-    /// Optional socket send buffer size.
-    pub socket_send_buffer_size: Option<usize>,
     /// Timeout for the initial connection handshake.
     pub connection_timeout: Duration,
     /// Timeout for an active session.
@@ -62,16 +58,14 @@ impl Default for RaknetStreamConfig {
     /// Default options for [`RaknetStreamConfig`].
     fn default() -> Self {
         Self {
-            connect_addr: None,
+            connect_addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 19132)),
             mtu: 1400,
-            socket_recv_buffer_size: None,
-            socket_send_buffer_size: None,
             connection_timeout: Duration::from_secs(10),
             session_timeout: Duration::from_secs(10),
-            max_ordering_channels: constants::MAXIMUM_ORDERING_CHANNELS as usize,
+            max_ordering_channels: MAXIMUM_ORDERING_CHANNELS as usize,
             ack_queue_capacity: 1024,
             split_timeout: Duration::from_secs(30),
-            reliable_window: constants::MAX_ACK_SEQUENCES as u32,
+            reliable_window: MAX_ACK_SEQUENCES as u32,
             max_split_parts: 8192,
             max_concurrent_splits: 4096,
         }
@@ -100,8 +94,6 @@ impl RaknetStreamConfig {
 pub struct RaknetStreamConfigBuilder {
     connect_addr: Option<SocketAddr>,
     mtu: u16,
-    socket_recv_buffer_size: Option<usize>,
-    socket_send_buffer_size: Option<usize>,
     connection_timeout: Duration,
     session_timeout: Duration,
     max_ordering_channels: usize,
@@ -117,10 +109,8 @@ impl Default for RaknetStreamConfigBuilder {
     fn default() -> Self {
         let config = RaknetStreamConfig::default();
         Self {
-            connect_addr: config.connect_addr,
+            connect_addr: None,
             mtu: config.mtu,
-            socket_recv_buffer_size: config.socket_recv_buffer_size,
-            socket_send_buffer_size: config.socket_send_buffer_size,
             connection_timeout: config.connection_timeout,
             session_timeout: config.session_timeout,
             max_ordering_channels: config.max_ordering_channels,
@@ -149,18 +139,6 @@ impl RaknetStreamConfigBuilder {
     /// Sets the MTU size to attempt negotiation with.
     pub fn mtu(mut self, mtu: u16) -> Self {
         self.mtu = mtu;
-        self
-    }
-
-    /// Sets the socket receive buffer size.
-    pub fn socket_recv_buffer_size(mut self, size: usize) -> Self {
-        self.socket_recv_buffer_size = Some(size);
-        self
-    }
-
-    /// Sets the socket send buffer size.
-    pub fn socket_send_buffer_size(mut self, size: usize) -> Self {
-        self.socket_send_buffer_size = Some(size);
         self
     }
 
@@ -214,11 +192,13 @@ impl RaknetStreamConfigBuilder {
 
     /// Builds the [`RaknetStreamConfig`] from the builder.
     pub fn build(self) -> RaknetStreamConfig {
+        let server = self
+            .connect_addr
+            .ok_or_else(|| crate::RaknetError::MissingConfigValue("connect_addr".to_string()))
+            .unwrap();
         RaknetStreamConfig {
-            connect_addr: self.connect_addr,
+            connect_addr: server,
             mtu: self.mtu,
-            socket_recv_buffer_size: self.socket_recv_buffer_size,
-            socket_send_buffer_size: self.socket_send_buffer_size,
             connection_timeout: self.connection_timeout,
             session_timeout: self.session_timeout,
             max_ordering_channels: self.max_ordering_channels,
@@ -240,6 +220,8 @@ pub struct RaknetStream {
     peer: SocketAddr,
     incoming: mpsc::Receiver<Result<ReceivedMessage, crate::RaknetError>>,
     outbound_tx: mpsc::Sender<OutboundMsg>,
+    cancel_token: CancellationToken,
+    _muxer_task: Option<JoinHandle<()>>,
 }
 
 impl RaknetStream {
@@ -249,34 +231,25 @@ impl RaknetStream {
         peer: SocketAddr,
         incoming: mpsc::Receiver<Result<ReceivedMessage, crate::RaknetError>>,
         outbound_tx: mpsc::Sender<OutboundMsg>,
+        cancel_token: CancellationToken,
+        muxer_task: Option<JoinHandle<()>>,
     ) -> Self {
         Self {
             local,
             peer,
             incoming,
             outbound_tx,
+            cancel_token,
+            _muxer_task: muxer_task,
         }
     }
 
     /// Connect to a RakNet server with a custom configuration.
     pub async fn connect(config: RaknetStreamConfig) -> Result<Self, crate::RaknetError> {
-        let server = config
-            .connect_addr
-            .ok_or_else(|| crate::RaknetError::MissingConfigValue("connect_addr".to_string()))?;
-        let bind_addr: SocketAddr = if server.is_ipv4() {
-            "0.0.0.0:0".parse().unwrap()
-        } else {
-            "[::]:0".parse().unwrap()
-        };
+        let server = config.connect_addr;
+        let bind_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
         let socket = UdpSocket::bind(bind_addr).await?;
         let local = socket.local_addr()?;
-
-        // if let Some(size) = config.socket_recv_buffer_size {
-        //     let _ = socket.set_recv_buffer_size(size);
-        // }
-        // if let Some(size) = config.socket_send_buffer_size {
-        //     let _ = socket.set_send_buffer_size(size);
-        // }
 
         // Perform offline handshake using OpenConnectionRequest1/2.
         let client_guid = client_guid();
@@ -292,6 +265,8 @@ impl RaknetStream {
             mpsc::channel::<Result<ReceivedMessage, crate::RaknetError>>(128);
         let (ready_tx, ready_rx) = oneshot::channel();
 
+        let cancel_token = CancellationToken::new();
+
         let context = ClientMuxerContext {
             server,
             server_guid: handshake.server_guid,
@@ -301,9 +276,10 @@ impl RaknetStream {
             to_app: to_app_tx,
             ready: ready_tx,
             config,
+            cancel_token: cancel_token.clone(),
         };
 
-        tokio::spawn(run_client_muxer(socket, context));
+        let muxer_task = tokio::spawn(run_client_muxer(socket, context));
 
         match ready_rx.await {
             Ok(Ok(())) => Ok(Self {
@@ -311,6 +287,8 @@ impl RaknetStream {
                 peer: server,
                 incoming: to_app_rx,
                 outbound_tx,
+                cancel_token,
+                _muxer_task: Some(muxer_task),
             }),
             Ok(Err(e)) => Err(e),
             Err(_) => Err(crate::RaknetError::ConnectionAborted),
@@ -360,6 +338,12 @@ impl RaknetStream {
     }
 }
 
+impl Drop for RaknetStream {
+    fn drop(&mut self) {
+        self.cancel_token.cancel();
+    }
+}
+
 impl Stream for RaknetStream {
     type Item = Result<ReceivedMessage, crate::RaknetError>;
 
@@ -386,6 +370,7 @@ struct ClientMuxerContext {
     to_app: mpsc::Sender<Result<ReceivedMessage, crate::RaknetError>>,
     ready: oneshot::Sender<Result<(), crate::RaknetError>>,
     config: RaknetStreamConfig,
+    cancel_token: CancellationToken,
 }
 
 #[tracing::instrument(skip(socket, context), fields(server = %context.server, mtu = context.config.mtu), level = "debug")]
@@ -423,6 +408,10 @@ async fn run_client_muxer(socket: UdpSocket, mut context: ClientMuxerContext) {
 
     loop {
         tokio::select! {
+            _ = context.cancel_token.cancelled() => {
+                tracing::debug!("client muxer cancelled");
+                break;
+            }
             res = socket.recv_from(&mut buf) => {
                 let (len, peer) = match res {
                     Ok(v) => v,
@@ -852,14 +841,12 @@ async fn flush_built_datagrams(
 #[tracing::instrument(skip(managed, ready), level = "trace")]
 fn notify_client_ready(
     managed: &ManagedSession,
-
     ready: &mut Option<oneshot::Sender<Result<(), crate::RaknetError>>>,
 ) {
-    if managed.is_connected()
-        && let Some(tx) = ready.take()
-    {
-        tracing::trace!("sending ready signal");
-
-        let _ = tx.send(Ok(()));
+    if managed.is_connected() {
+        if let Some(tx) = ready.take() {
+            tracing::trace!("sending ready signal");
+            let _ = tx.send(Ok(()));
+        }
     }
 }

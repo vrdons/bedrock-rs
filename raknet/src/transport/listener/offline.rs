@@ -31,8 +31,7 @@ pub(super) struct PendingConnection {
 }
 
 pub(super) fn is_offline_packet_id(id: u8) -> bool {
-    let x = matches!(id, 0x01 | 0x02 | 0x05 | 0x07);
-    x
+    matches!(id, 0x01 | 0x02 | 0x05 | 0x07)
 }
 
 use crate::transport::listener::RaknetListenerConfig;

@@ -1,8 +1,8 @@
 //! Tokio-based UDP transport layer for RakNet sessions.
 //!
 //! This module exposes high-level server and client types:
-//! - `RaknetListener` / `RaknetConnection` for server-side use.
-//! - `RaknetStream` for client and server connections.
+//! - [`RaknetListener`] for server-side connection acceptance
+//! - [`RaknetStream`] for both client and server connections
 //!
 //! All low-level RakNet details (fragmentation, reliability, ordering,
 //! ACK/NACK handling) are delegated to the `session` module.

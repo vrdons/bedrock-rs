@@ -342,7 +342,12 @@ impl Session {
         size
     }
 
-    fn track_sent_datagram(&mut self, dgram: Datagram, seq: Sequence24, now: Instant) -> OutgoingDatagram {
+    fn track_sent_datagram(
+        &mut self,
+        dgram: Datagram,
+        seq: Sequence24,
+        now: Instant,
+    ) -> OutgoingDatagram {
         let rto = self.sliding.get_rto_for_retransmission();
         let dgram = Arc::new(dgram);
         let tracked = TrackedDatagram {

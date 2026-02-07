@@ -2,16 +2,18 @@ mod offline;
 mod online;
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
+use futures::{Stream, StreamExt};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use futures::{Stream, StreamExt};
 
 use crate::protocol::constants::{self, UDP_HEADER_SIZE};
 use crate::transport::listener_conn::SessionState;
@@ -26,7 +28,7 @@ use online::{dispatch_datagram, handle_outgoing_msg, tick_sessions};
 #[derive(Debug, Clone)]
 pub struct RaknetListenerConfig {
     /// Address to start server.
-    pub bind_addr: Option<SocketAddr>,
+    pub bind_addr: SocketAddr,
 
     /// Maximum number of concurrent connections allowed.
     pub max_connections: usize,
@@ -36,12 +38,6 @@ pub struct RaknetListenerConfig {
 
     /// Maximum MTU size to support/advertise.
     pub max_mtu: u16,
-
-    /// Optional socket receive buffer size.
-    pub socket_recv_buffer_size: Option<usize>,
-
-    /// Optional socket send buffer size.
-    pub socket_send_buffer_size: Option<usize>,
 
     /// Timeout duration for inactive sessions.
     pub session_timeout: Duration,
@@ -77,12 +73,10 @@ pub struct RaknetListenerConfig {
 impl Default for RaknetListenerConfig {
     fn default() -> Self {
         Self {
-            bind_addr: None,
+            bind_addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 19132)),
             max_connections: 1024,
             max_pending_connections: 1024,
             max_mtu: 1400,
-            socket_recv_buffer_size: None,
-            socket_send_buffer_size: None,
             session_timeout: Duration::from_secs(10),
             session_stale: Duration::from_secs(5),
             max_queued_reliable_bytes: 4 * 1024 * 1024, // 4MB
@@ -116,8 +110,6 @@ pub struct RaknetListenerConfigBuilder {
     max_connections: usize,
     max_pending_connections: usize,
     max_mtu: u16,
-    socket_recv_buffer_size: Option<usize>,
-    socket_send_buffer_size: Option<usize>,
     session_timeout: Duration,
     session_stale: Duration,
     max_queued_reliable_bytes: usize,
@@ -134,12 +126,10 @@ impl Default for RaknetListenerConfigBuilder {
     fn default() -> Self {
         let config = RaknetListenerConfig::default();
         Self {
-            bind_addr: config.bind_addr,
+            bind_addr: None,
             max_connections: config.max_connections,
             max_pending_connections: config.max_pending_connections,
             max_mtu: config.max_mtu,
-            socket_recv_buffer_size: config.socket_recv_buffer_size,
-            socket_send_buffer_size: config.socket_send_buffer_size,
             session_timeout: config.session_timeout,
             session_stale: config.session_stale,
             max_queued_reliable_bytes: config.max_queued_reliable_bytes,
@@ -187,18 +177,6 @@ impl RaknetListenerConfigBuilder {
     /// Sets the maximum MTU size.
     pub fn max_mtu(mut self, mtu: u16) -> Self {
         self.max_mtu = mtu;
-        self
-    }
-
-    /// Sets the socket receive buffer size.
-    pub fn socket_recv_buffer_size(mut self, size: Option<usize>) -> Self {
-        self.socket_recv_buffer_size = size;
-        self
-    }
-
-    /// Sets the socket send buffer size.
-    pub fn socket_send_buffer_size(mut self, size: Option<usize>) -> Self {
-        self.socket_send_buffer_size = size;
         self
     }
 
@@ -264,13 +242,15 @@ impl RaknetListenerConfigBuilder {
 
     /// Builds the [`RaknetListenerConfig`].
     pub fn build(self) -> RaknetListenerConfig {
+        let addr = self
+            .bind_addr
+            .ok_or_else(|| crate::RaknetError::MissingConfigValue("bind_addr".to_string()))
+            .unwrap();
         RaknetListenerConfig {
-            bind_addr: self.bind_addr,
+            bind_addr: addr,
             max_connections: self.max_connections,
             max_pending_connections: self.max_pending_connections,
             max_mtu: self.max_mtu,
-            socket_recv_buffer_size: self.socket_recv_buffer_size,
-            socket_send_buffer_size: self.socket_send_buffer_size,
             session_timeout: self.session_timeout,
             session_stale: self.session_stale,
             max_queued_reliable_bytes: self.max_queued_reliable_bytes,
@@ -294,36 +274,27 @@ pub struct RaknetListener {
     )>,
     outbound_tx: mpsc::Sender<super::OutboundMsg>,
     advertisement: Arc<RwLock<Vec<u8>>>,
+    cancel_token: CancellationToken,
+    _muxer_task: JoinHandle<()>,
 }
 
 impl RaknetListener {
     /// Binds a new listener to the specified address using the provided configuration.
     pub async fn bind(config: RaknetListenerConfig) -> std::io::Result<Self> {
-        let addr = config.bind_addr.ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "bind_addr is required in config",
-            )
-        })?;
-        let socket = UdpSocket::bind(addr).await?;
-        // if let Some(size) = config.socket_recv_buffer_size {
-        //     let _ = socket.set_recv_buffer_size(size);
-        // }
-        // if let Some(size) = config.socket_send_buffer_size {
-        //     let _ = socket.set_send_buffer_size(size);
-        // }
-
+        let socket = UdpSocket::bind(config.bind_addr).await?;
         let local_addr = socket.local_addr()?;
         let (new_conn_tx, new_conn_rx) = mpsc::channel(32);
         let (outbound_tx, outbound_rx) = mpsc::channel(1024);
         let advertisement = Arc::new(RwLock::new(config.advertisement.clone()));
+        let cancel_token = CancellationToken::new();
 
-        tokio::spawn(run_listener_muxer(
+        let muxer_task = tokio::spawn(run_listener_muxer(
             socket,
             config,
             new_conn_tx,
             outbound_rx,
             advertisement.clone(),
+            cancel_token.clone(),
         ));
 
         Ok(Self {
@@ -331,6 +302,8 @@ impl RaknetListener {
             new_connections: new_conn_rx,
             outbound_tx,
             advertisement,
+            cancel_token,
+            _muxer_task: muxer_task,
         })
     }
 
@@ -359,17 +332,29 @@ impl RaknetListener {
     }
 }
 
+impl Drop for RaknetListener {
+    fn drop(&mut self) {
+        self.cancel_token.cancel();
+    }
+}
+
 impl Stream for RaknetListener {
     type Item = RaknetStream;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.new_connections.poll_recv(cx) {
-            Poll::Ready(Some((peer, incoming))) => Poll::Ready(Some(RaknetStream::new(
-                self.local_addr,
-                peer,
-                incoming,
-                self.outbound_tx.clone(),
-            ))),
+            Poll::Ready(Some((peer, incoming))) => {
+                // Each connection gets a child token so closing one stream doesn't cancel siblings
+                // or the listener, while the listener can still cancel all children via the parent token
+                Poll::Ready(Some(RaknetStream::new(
+                    self.local_addr,
+                    peer,
+                    incoming,
+                    self.outbound_tx.clone(),
+                    self.cancel_token.child_token(),
+                    None,
+                )))
+            }
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,
         }
@@ -389,6 +374,8 @@ async fn run_listener_muxer(
     mut outbound_rx: mpsc::Receiver<super::OutboundMsg>,
 
     advertisement: Arc<RwLock<Vec<u8>>>,
+
+    cancel_token: CancellationToken,
 ) {
     // Allocate a receive buffer large enough to avoid OS "message too long" errors even if a peer
     // sends a slightly larger probe than our configured MTU.
@@ -399,6 +386,10 @@ async fn run_listener_muxer(
 
     loop {
         tokio::select! {
+            _ = cancel_token.cancelled() => {
+                tracing::debug!("listener muxer cancelled");
+                break;
+            }
             res = socket.recv_from(&mut buf) => {
                 match res  {
                     Ok((len, peer)) => {

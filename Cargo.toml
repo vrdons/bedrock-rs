@@ -3,6 +3,7 @@ name = "bedrock"
 version = "0.1.0"
 edition = "2024"
 readme = "README.md"
+rust-version = "1.85"
 
 [workspace]
 members = ["raknet", "nethernet"]
@@ -10,16 +11,21 @@ resolver = "2"
 
 [workspace.dependencies]
 tokio = { version = "1.49.0", features = ["net", "sync", "time", "rt-multi-thread", "macros"] }
+tokio-util = "0.7"
 tracing = "0.1.44"
 bitflags = "2.10.0"
-bytes = "1.11.0"
+bytes = "1.11.1"
 thiserror = "2.0.17"
+webrtc = "0.17.0"
+futures = "0.3.31"
+tracing-subscriber = "0.3.22"
+aes = "0.8.4"
+sha2 = "0.10.9"
+hmac = "0.12.1"
+hex = "0.4.3"
 rand = "0.9.2"
-webrtc = "0.14.0"
-futures = { version = "0.3.31" }
+serde_json = "1.0.149"
 
 [dependencies]
-raknet = { path="./raknet" }
-nethernet = { path="./nethernet" }
-tokio = { workspace = true }
-tracing = { workspace = true }
+raknet = { path = "./raknet" }
+nethernet = { path = "./nethernet" }
