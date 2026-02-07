@@ -52,7 +52,7 @@ impl Session {
 
             Box::pin(async move {
                 let data_len = data.len();
-                match MessageSegment::decode(data.clone()) {
+                match MessageSegment::decode(data.as_ref()) {
                     Ok(segment) => {
                         let result = {
                             let mut buf = buffer.lock().await;
@@ -149,11 +149,12 @@ impl Session {
 
     /// Closes the session
     pub async fn close(&self) -> Result<()> {
-        if *self.closed.read().await {
+        let mut closed = self.closed.write().await;
+        if *closed {
             return Ok(());
         }
-
-        *self.closed.write().await = true;
+        *closed = true;
+        drop(closed);
 
         // Acquire lock, clone the channel, drop the lock, then close
         let reliable = self.reliable_channel.lock().await.clone();

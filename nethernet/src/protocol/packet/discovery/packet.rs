@@ -146,6 +146,17 @@ pub fn unmarshal(data: &[u8]) -> Result<(Box<dyn Packet>, u64)> {
     // Read packet data
     packet.read(&mut cursor)?;
 
+    // Validate that cursor has been fully consumed
+    let cursor_position = cursor.position() as usize;
+    let payload_len = cursor.get_ref().len();
+    if cursor_position < payload_len {
+        let remaining = payload_len - cursor_position;
+        return Err(NethernetError::Other(format!(
+            "trailing data in packet: {} remaining bytes out of {} total payload bytes",
+            remaining, payload_len
+        )));
+    }
+
     Ok((packet, header.sender_id))
 }
 

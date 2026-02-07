@@ -1,6 +1,6 @@
 use crate::error::{NethernetError, Result};
 use crate::protocol::constants::MAX_MESSAGE_SIZE;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 
 /// Message segment
 /// First byte contains segment count, remainder contains data
@@ -29,17 +29,17 @@ impl MessageSegment {
     }
 
     /// Decodes a segment from bytes
-    pub fn decode(mut data: Bytes) -> Result<Self> {
+    pub fn decode(data: &[u8]) -> Result<Self> {
         if data.len() < 2 {
             return Err(NethernetError::MessageParse(
                 "Message too short, expected at least 2 bytes".to_string(),
             ));
         }
 
-        let remaining_segments = data.get_u8();
+        let remaining_segments = data[0];
         Ok(Self {
             remaining_segments,
-            data,
+            data: Bytes::copy_from_slice(&data[1..]),
         })
     }
 }

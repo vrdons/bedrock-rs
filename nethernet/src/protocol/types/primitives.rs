@@ -78,6 +78,16 @@ pub fn write_bytes<L: TryFrom<usize>>(
 where
     <L as TryFrom<usize>>::Error: std::fmt::Debug,
 {
+    if data.len() > MAX_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "data length {} exceeds maximum allowed {}",
+                data.len(),
+                MAX_BYTES
+            ),
+        ));
+    }
     let length = L::try_from(data.len()).map_err(|e| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
