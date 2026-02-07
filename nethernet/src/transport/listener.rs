@@ -93,8 +93,17 @@ impl<S: Signaling + 'static> NethernetListener<S> {
         
         // Configure SettingEngine to avoid IPv6 link-local binding issues
         let mut setting_engine = SettingEngine::default();
-        // Disable IPv6 to avoid link-local binding errors on Linux
-        setting_engine.set_ip_filter(Box::new(|ip| !ip.is_ipv6()));
+        // Reject only IPv6 link-local addresses (fe80::/10) to avoid binding errors on Linux
+        setting_engine.set_ip_filter(Box::new(|ip| {
+            match ip {
+                std::net::IpAddr::V6(v6) => {
+                    let octets = v6.octets();
+                    // Reject IPv6 link-local addresses (fe80::/10)
+                    !(octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80)
+                }
+                _ => true, // Allow IPv4 and other addresses
+            }
+        }));
         
         let api = APIBuilder::new()
             .with_media_engine(media_engine)
