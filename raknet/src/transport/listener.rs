@@ -426,14 +426,6 @@ impl Drop for RaknetListener {
     /// Cancels the listener's cancellation token, signaling background tasks to stop.
     ///
     /// This runs when the listener is dropped to ensure the background muxer and related tasks are terminated.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// // When a RaknetListener is dropped, its background tasks are cancelled.
-    /// // let listener = RaknetListener::bind(config).await.unwrap();
-    /// // drop(listener);
-    /// ```
     fn drop(&mut self) {
         self.cancel_token.cancel();
     }

@@ -136,7 +136,7 @@ impl Header {
 ///
 /// # Returns
 ///
-/// A Vec<u8> containing the serialized packet: the 32-byte HMAC-SHA256 checksum followed by the AES-ECB encrypted payload.
+/// A `Vec<u8>` containing the serialized packet: the 32-byte HMAC-SHA256 checksum followed by the AES-ECB encrypted payload.
 pub fn marshal(packet: &dyn Packet, sender_id: u64) -> Result<Vec<u8>> {
     let mut buf = Vec::new();
 

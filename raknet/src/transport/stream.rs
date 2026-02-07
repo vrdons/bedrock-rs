@@ -161,21 +161,13 @@ impl RaknetStreamConfigBuilder {
     }
 
     /// Set the MTU (maximum transmission unit), in bytes, to propose during the connection handshake.
-    
     ///
-    
     /// The specified value is used when negotiating packet fragmentation and framing with the remote peer.
-    
     ///
-    
     /// # Examples
-    
     ///
-    
     /// ```
-    
     /// let cfg = RaknetStreamConfig::builder().mtu(1400).build();
-    
     /// ```
     pub fn mtu(mut self, mtu: u16) -> Self {
         self.mtu = mtu;

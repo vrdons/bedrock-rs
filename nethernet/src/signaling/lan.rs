@@ -132,18 +132,6 @@ impl LanSignaling {
     }
 
     /// Return the last-known socket address for the given network ID, if any.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// // `lan` is a `LanSignaling` instance created elsewhere.
-    /// let maybe_addr = lan.get_address(42).await;
-    /// if let Some(addr) = maybe_addr {
-    ///     println!("found address: {}", addr);
-    /// } else {
-    ///     println!("no known address for network id 42");
-    /// }
-    /// ```
     pub async fn get_address(&self, network_id: u64) -> Option<SocketAddr> {
         self.addresses
             .read()
@@ -155,42 +143,7 @@ impl LanSignaling {
     /// Spawns a background Tokio task that maintains LAN signaling I/O and state.
     ///
     /// The spawned task receives and handles UDP packets, periodically removes stale peer addresses, optionally issues discovery requests to the provided broadcast address, and exits when `cancel_token` is triggered.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::net::SocketAddr;
-    /// use std::sync::Arc;
-    /// use tokio::task::JoinHandle;
-    /// use tokio::net::UdpSocket;
-    /// use tokio_util::sync::CancellationToken;
-    ///
-    /// // prepare the required arguments (omitted): network_id, socket, addresses, signal_tx,
-    /// // server_data, discovered_servers, broadcast_addr, cancel_token
-    ///
-    /// # async fn example_start(
-    /// #     network_id: u64,
-    /// #     socket: Arc<UdpSocket>,
-    /// #     addresses: Arc<()>,
-    /// #     signal_tx: (),
-    /// #     server_data: Arc<()> ,
-    /// #     discovered_servers: Arc<()>,
-    /// #     broadcast_addr: Option<SocketAddr>,
-    /// #     cancel_token: CancellationToken,
-    /// # ) {
-    /// let _handle: JoinHandle<()> = start_background_task(
-    ///     network_id,
-    ///     socket,
-    ///     // the following placeholders stand in for the real shared structures:
-    ///     unsafe { std::mem::transmute(addresses) },
-    ///     unsafe { std::mem::transmute(signal_tx) },
-    ///     server_data,
-    ///     unsafe { std::mem::transmute(discovered_servers) },
-    ///     broadcast_addr,
-    ///     cancel_token,
-    /// );
-    /// # }
-    /// ```
+    #[allow(clippy::too_many_arguments)]
     fn start_background_task(
         network_id: u64,
         socket: Arc<UdpSocket>,
@@ -285,6 +238,7 @@ impl LanSignaling {
     /// - RESPONSE: parse and store discovered ServerData into the discovered_servers map.
     /// - MESSAGE: ignore ping tokens; if the message is addressed to this node, parse it into
     ///   a Signal and broadcast it via the provided signal channel.
+    ///
     /// Logs and early-returns on unrecognized or malformed packets.
     ///
     /// # Arguments
@@ -484,13 +438,6 @@ impl Drop for LanSignaling {
     /// This Drop implementation signals the internal cancellation token so the
     /// background task started by the instance can terminate promptly.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// // When `lan` goes out of scope or is dropped, its background task is cancelled.
-    /// // let lan = LanSignaling::new(42, bind_addr).await.unwrap();
-    /// // drop(lan);
-    /// ```
     fn drop(&mut self) {
         self.cancel_token.cancel();
     }
@@ -568,15 +515,6 @@ impl Signaling for LanSignaling {
     }
 
     /// Returns the local network identifier as a decimal string.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// // Given a LanSignaling instance `lan`, obtain its network id string:
-    /// // let lan = /* obtain LanSignaling instance */;
-    /// // let id_str = lan.network_id();
-    /// // assert_eq!(id_str, "42");
-    /// ```
     fn network_id(&self) -> String {
         self.network_id.to_string()
     }
@@ -585,14 +523,6 @@ impl Signaling for LanSignaling {
     ///
     /// Attempts to decode `data` into a `ServerData`. If decoding succeeds, the decoded value
     /// replaces the currently stored server data; if decoding fails, the stored value is unchanged.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// // Given a `LanSignaling` instance `signaling` and a `ServerData` value:
-    /// let bytes = server_data.marshal();
-    /// signaling.set_pong_data(bytes);
-    /// ```
     fn set_pong_data(&self, data: Vec<u8>) {
         *self.server_data.write().unwrap_or_else(|e| e.into_inner()) =
             ServerData::unmarshal(&data).ok();

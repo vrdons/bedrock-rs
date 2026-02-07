@@ -139,49 +139,27 @@ pub fn read_bytes_u8(r: &mut dyn Read) -> io::Result<Vec<u8>> {
 }
 
 /// Reads a length-prefixed byte array where the length is encoded as a 32-bit little-endian integer.
-
 ///
-
 /// The function first reads a 32-bit little-endian unsigned length, validates it against the module's
-
 /// maximum allowed size, then reads and returns exactly that many bytes.
-
 ///
-
 /// # Returns
-
 ///
-
 /// A `Vec<u8>` containing the bytes whose length was specified by the 32-bit little-endian prefix.
-
 ///
-
 /// # Errors
-
 ///
-
 /// Returns an `io::Error` if reading the length or the bytes fails, or if the declared length exceeds the
-
 /// allowed maximum or cannot be represented for allocation.
-
 ///
-
 /// # Examples
-
 ///
-
 /// ```
-
 /// use std::io::Cursor;
-
 /// // length = 3 (little-endian), data = [1, 2, 3]
-
 /// let mut buf = Cursor::new([3u8, 0, 0, 0, 1, 2, 3].to_vec());
-
 /// let bytes = nethernet::protocol::types::primitives::read_bytes_u32(&mut buf).unwrap();
-
 /// assert_eq!(bytes, vec![1, 2, 3]);
-
 /// ```
 pub fn read_bytes_u32(r: &mut dyn Read) -> io::Result<Vec<u8>> {
     use super::U32LE;

@@ -23,31 +23,18 @@ static ENCRYPTION_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
 });
 
 /// Access the module's static 32-byte encryption key.
-
 ///
-
 /// The key is computed once at initialization and cached; this function returns
-
 /// a static reference to that 32-byte key for use in encryption and HMAC.
-
 ///
-
 /// # Examples
-
 ///
-
 /// ```
-
 /// let k1 = encryption_key();
-
 /// let k2 = encryption_key();
-
 /// // Both calls yield the same 32-byte key content and the same static reference.
-
 /// assert_eq!(k1, k2);
-
 /// assert_eq!(k1.len(), 32);
-
 /// ```
 pub(crate) fn encryption_key() -> &'static [u8; 32] {
     &ENCRYPTION_KEY

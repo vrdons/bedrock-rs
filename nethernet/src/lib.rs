@@ -8,13 +8,11 @@
 //!
 //! ## Features
 //!
-//! - Full tokio and futures usage (like raknet)
 //! - WebRTC-based peer-to-peer connections
 //! - ICE, DTLS, SCTP transport support
 //! - Reliable and unreliable data channels
 //! - Message segmentation (for messages over 10KB)
 //! - LAN discovery with AES-ECB encryption and HMAC-SHA256 authentication
-//! - Xbox Live signaling via WebSocket
 //! - Signal protocol compatible with Go implementation
 
 pub mod error;
