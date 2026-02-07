@@ -311,9 +311,15 @@ impl Signaling for LanSignaling {
     fn signals(&self) -> Pin<Box<dyn Stream<Item = Signal> + Send>> {
         let rx = self.signal_tx.subscribe();
         Box::pin(futures::stream::unfold(rx, |mut rx| async move {
-            match rx.recv().await {
-                Ok(signal) => Some((signal, rx)),
-                Err(_) => None,
+            loop {
+                match rx.recv().await {
+                    Ok(signal) => return Some((signal, rx)),
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("Signal receiver lagged, missed {} signals", n);
+                        continue; // Skip lost messages, keep receiving
+                    }
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                }
             }
         }))
     }
