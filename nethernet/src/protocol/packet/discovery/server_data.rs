@@ -4,7 +4,9 @@
 //! to RequestPacket broadcasted by clients on port 7551.
 
 use crate::error::{NethernetError, Result};
-use crate::protocol::types::{read_bytes_u8, read_i32_le, read_u8, write_bytes_u8, write_u8};
+use crate::protocol::types::{
+    read_bytes_u8, read_i32_le, read_u8, write_bytes_u8, write_i32_le, write_u8,
+};
 use std::io::Cursor;
 
 /// Current version of ServerData supported by the discovery module.
@@ -86,8 +88,8 @@ impl ServerData {
         write_u8(&mut buf, self.game_type << 1)?;
 
         // Write player counts (i32 little-endian)
-        buf.extend_from_slice(&self.player_count.to_le_bytes());
-        buf.extend_from_slice(&self.max_player_count.to_le_bytes());
+        write_i32_le(&mut buf, self.player_count)?;
+        write_i32_le(&mut buf, self.max_player_count)?;
 
         // Write booleans
         write_u8(&mut buf, if self.editor_world { 1 } else { 0 })?;

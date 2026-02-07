@@ -16,7 +16,7 @@ pub struct Session {
     unreliable_channel: Arc<Mutex<Option<Arc<RTCDataChannel>>>>,
     message_buffer: Arc<Mutex<Message>>,
     packet_tx: mpsc::Sender<Bytes>,
-    packet_rx: Arc<Mutex<mpsc::Receiver<Bytes>>>,
+    packet_rx: Arc<Mutex<Option<mpsc::Receiver<Bytes>>>>,
     closed: Arc<RwLock<bool>>,
 }
 
@@ -35,7 +35,7 @@ impl Session {
             unreliable_channel: Arc::new(Mutex::new(None)),
             message_buffer: Arc::new(Mutex::new(Message::new())),
             packet_tx,
-            packet_rx: Arc::new(Mutex::new(packet_rx)),
+            packet_rx: Arc::new(Mutex::new(Some(packet_rx))),
             closed: Arc::new(RwLock::new(false)),
         }
     }
@@ -121,13 +121,30 @@ impl Session {
     }
 
     /// Receives a message
+    ///
+    /// Note: This method temporarily takes ownership of the receiver to avoid
+    /// holding the Mutex guard across an await point. If another caller attempts
+    /// to recv() while a recv() is already in progress, they will receive an error.
     pub async fn recv(&self) -> Result<Option<Bytes>> {
         if *self.closed.read().await {
             return Ok(None);
         }
 
-        let mut rx = self.packet_rx.lock().await;
-        Ok(rx.recv().await)
+        // Take the receiver out of the Option to avoid holding the lock across await
+        let mut rx = {
+            let mut guard = self.packet_rx.lock().await;
+            guard.take().ok_or_else(|| {
+                NethernetError::DataChannel("Receiver already in use by another caller".to_string())
+            })?
+        };
+
+        // Receive outside the lock
+        let result = rx.recv().await;
+
+        // Put the receiver back
+        *self.packet_rx.lock().await = Some(rx);
+
+        Ok(result)
     }
 
     /// Closes the session

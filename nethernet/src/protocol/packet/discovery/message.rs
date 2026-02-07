@@ -3,11 +3,11 @@
 //! Sent by both server and client to negotiate a NetherNet connection
 //! and exchange ICE candidates.
 
-use super::packet::{Packet};
+use super::packet::Packet;
 use crate::error::Result;
+use crate::protocol::constants::ID_MESSAGE_PACKET;
 use crate::protocol::types::{U64LE, read_bytes_u32, write_bytes_u32};
 use std::io::{Read, Write};
-use crate::protocol::constants::{ID_MESSAGE_PACKET};
 
 /// MessagePacket is used for negotiating WebRTC connections.
 /// It contains the recipient network ID and signaling data.

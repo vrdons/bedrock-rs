@@ -52,7 +52,7 @@ pub(crate) fn decrypt(data: &[u8]) -> Result<Vec<u8>> {
     let key = encryption_key();
     let cipher = Aes256::new(key.into());
 
-    if data.len() % 16 != 0 {
+    if data.is_empty() || data.len() % 16 != 0 {
         return Err(NethernetError::Other(
             "Invalid encrypted data length".to_string(),
         ));

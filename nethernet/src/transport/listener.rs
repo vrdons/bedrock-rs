@@ -7,11 +7,14 @@ use crate::session::Session;
 use crate::signaling::Signaling;
 use futures::{Stream, StreamExt};
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::sync::{Mutex, mpsc};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use webrtc::api::APIBuilder;
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::setting_engine::SettingEngine;
@@ -19,12 +22,11 @@ use webrtc::peer_connection::configuration::RTCConfiguration;
 
 /// NetherNet listener - accepts WebRTC connections
 pub struct NethernetListener<S: Signaling> {
-    signaling: Arc<S>,
     incoming: Arc<Mutex<mpsc::UnboundedReceiver<Arc<Session>>>>,
-    incoming_tx: mpsc::UnboundedSender<Arc<Session>>,
     local_addr: SocketAddr,
-    /// Map of connection IDs to per-connection signal senders
-    signal_dispatchers: Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<Signal>>>>,
+    cancel_token: CancellationToken,
+    _signal_handler_task: JoinHandle<()>,
+    _phantom: PhantomData<S>,
 }
 
 impl<S: Signaling + 'static> NethernetListener<S> {
@@ -33,53 +35,72 @@ impl<S: Signaling + 'static> NethernetListener<S> {
         let signaling = Arc::new(signaling);
         let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
         let signal_dispatchers = Arc::new(Mutex::new(HashMap::new()));
+        let cancel_token = CancellationToken::new();
+
+        // Start signal handler task
+        let signal_handler_task = Self::start_signal_handler(
+            signaling,
+            incoming_tx,
+            signal_dispatchers,
+            cancel_token.clone(),
+        );
 
         let listener = Self {
-            signaling: signaling.clone(),
             incoming: Arc::new(Mutex::new(incoming_rx)),
-            incoming_tx,
             local_addr,
-            signal_dispatchers: signal_dispatchers.clone(),
+            cancel_token,
+            _signal_handler_task: signal_handler_task,
+            _phantom: PhantomData,
         };
-
-        // Start signal handler
-        listener.start_signal_handler();
 
         Ok(listener)
     }
 
-    fn start_signal_handler(&self) {
-        let signaling = self.signaling.clone();
-        let incoming_tx = self.incoming_tx.clone();
-        let signal_dispatchers = self.signal_dispatchers.clone();
-
+    fn start_signal_handler(
+        signaling: Arc<S>,
+        incoming_tx: mpsc::UnboundedSender<Arc<Session>>,
+        signal_dispatchers: Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<Signal>>>>,
+        cancel_token: CancellationToken,
+    ) -> JoinHandle<()> {
         tokio::spawn(async move {
             let mut signals = signaling.signals();
 
-            while let Some(signal) = signals.next().await {
-                match signal.signal_type {
-                    SignalType::Offer => {
-                        if let Err(e) = Self::handle_offer(
-                            signal,
-                            &signaling,
-                            &incoming_tx,
-                            &signal_dispatchers,
-                        )
-                        .await
-                        {
-                            tracing::debug!("Failed to handle offer: {}", e);
-                        }
+            loop {
+                tokio::select! {
+                    _ = cancel_token.cancelled() => {
+                        break;
                     }
-                    SignalType::Answer | SignalType::Candidate | SignalType::Error => {
-                        // Dispatch to per-connection channel
-                        let dispatchers = signal_dispatchers.lock().await;
-                        if let Some(tx) = dispatchers.get(&signal.connection_id) {
-                            let _ = tx.send(signal);
+                    signal = signals.next() => {
+                        match signal {
+                            Some(signal) => {
+                                match signal.signal_type {
+                                    SignalType::Offer => {
+                                        if let Err(e) = Self::handle_offer(
+                                            signal,
+                                            &signaling,
+                                            &incoming_tx,
+                                            &signal_dispatchers,
+                                        )
+                                        .await
+                                        {
+                                            tracing::debug!("Failed to handle offer: {}", e);
+                                        }
+                                    }
+                                    SignalType::Answer | SignalType::Candidate | SignalType::Error => {
+                                        // Dispatch to per-connection channel
+                                        let dispatchers = signal_dispatchers.lock().await;
+                                        if let Some(tx) = dispatchers.get(&signal.connection_id) {
+                                            let _ = tx.send(signal);
+                                        }
+                                    }
+                                }
+                            }
+                            None => break,
                         }
                     }
                 }
             }
-        });
+        })
     }
 
     async fn handle_offer(
@@ -90,7 +111,7 @@ impl<S: Signaling + 'static> NethernetListener<S> {
     ) -> Result<()> {
         // Create WebRTC API with custom settings
         let media_engine = MediaEngine::default();
-        
+
         // Configure SettingEngine to avoid IPv6 link-local binding issues
         let mut setting_engine = SettingEngine::default();
         // Reject only IPv6 link-local addresses (fe80::/10) to avoid binding errors on Linux
@@ -104,7 +125,7 @@ impl<S: Signaling + 'static> NethernetListener<S> {
                 _ => true, // Allow IPv4 and other addresses
             }
         }));
-        
+
         let api = APIBuilder::new()
             .with_media_engine(media_engine)
             .with_setting_engine(setting_engine)
@@ -245,6 +266,12 @@ impl<S: Signaling + 'static> NethernetListener<S> {
     /// Returns the local address
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
+    }
+}
+
+impl<S: Signaling> Drop for NethernetListener<S> {
+    fn drop(&mut self) {
+        self.cancel_token.cancel();
     }
 }
 

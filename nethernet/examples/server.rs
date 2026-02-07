@@ -5,9 +5,9 @@
 //! - Accepts incoming WebRTC connections
 //! - Handles packets from clients
 
-use nethernet::{NethernetListener, ServerData, Signaling};
-use nethernet::signaling::lan::LanSignaling;
 use futures::StreamExt;
+use nethernet::signaling::lan::LanSignaling;
+use nethernet::{NethernetListener, ServerData, Signaling};
 use std::net::SocketAddr;
 use tracing::Level;
 use tracing_subscriber::{filter, layer::SubscriberExt, util::SubscriberInitExt};
@@ -34,29 +34,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // IMPORTANT: Server must bind to 7551 to receive broadcast discovery requests
     let network_id = rand::random::<u64>();
     let bind_addr: SocketAddr = "0.0.0.0:7551".parse()?;
-    
+
     let signaling = LanSignaling::new(network_id, bind_addr).await?;
-    
+
     // Set server data for discovery responses
     signaling.set_pong_data(server_data.marshal()?);
-    
+
     tracing::info!("NetherNet server starting");
     tracing::info!("   Network ID: {}", network_id);
     tracing::info!("   Listening on: {}", bind_addr);
     tracing::info!("   Broadcasting discovery responses...");
-    
+
     // Create listener
     let mut listener = NethernetListener::bind(signaling, bind_addr).await?;
     tracing::info!("✅ Server ready and responding to LAN discovery");
-    
+
     // Accept incoming connections
     while let Some(session) = listener.next().await {
         tracing::info!("🔗 New client connected");
-        
+
         // Spawn a task to handle this client
         tokio::spawn(async move {
             let mut packet_count = 0;
-            
+
             loop {
                 match session.recv().await {
                     Ok(Some(data)) => {
@@ -77,10 +77,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            
+
             tracing::info!("Client session ended ({} packets received)", packet_count);
         });
     }
-    
+
     Ok(())
 }

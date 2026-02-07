@@ -37,12 +37,12 @@ impl NethernetStream {
     ) -> Result<Self> {
         // Create WebRTC API with custom settings
         let media_engine = MediaEngine::default();
-        
+
         // Configure SettingEngine to avoid IPv6 link-local binding issues
         let mut setting_engine = SettingEngine::default();
         // Disable IPv6 to avoid link-local binding errors on Linux
         setting_engine.set_ip_filter(Box::new(|ip| !ip.is_ipv6()));
-        
+
         let api = APIBuilder::new()
             .with_media_engine(media_engine)
             .with_setting_engine(setting_engine)

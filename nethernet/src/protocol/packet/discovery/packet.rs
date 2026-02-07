@@ -132,7 +132,7 @@ pub fn unmarshal(data: &[u8]) -> Result<(Box<dyn Packet>, u64)> {
 
     // Create appropriate packet based on ID
     let mut packet: Box<dyn Packet> = match header.packet_id {
-        ID_REQUEST_PACKET => Box::new(RequestPacket::default()),
+        ID_REQUEST_PACKET => Box::new(RequestPacket),
         ID_RESPONSE_PACKET => Box::new(ResponsePacket::default()),
         ID_MESSAGE_PACKET => Box::new(MessagePacket::default()),
         _ => {

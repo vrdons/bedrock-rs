@@ -2,11 +2,11 @@
 //!
 //! Sent by servers in response to a RequestPacket from clients
 //! to advertise the world/server information.
-use super::packet::{Packet};
+use super::packet::Packet;
 use crate::error::Result;
+use crate::protocol::constants::ID_RESPONSE_PACKET;
 use crate::protocol::types::{read_bytes_u32, write_bytes_u32};
 use std::io::{Read, Write};
-use crate::protocol::constants::{ID_RESPONSE_PACKET};
 
 /// ResponsePacket is sent by servers to respond to discovery requests.
 /// It contains hex-encoded ServerData payload.

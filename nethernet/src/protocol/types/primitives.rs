@@ -64,6 +64,8 @@ pub fn read_bytes_u32(r: &mut dyn Read) -> io::Result<Vec<u8>> {
     use super::U32LE;
     let length = U32LE::read(r)?.0;
 
+    // Length already consumed by U32LE::read above, so the closure passed to read_bytes
+    // intentionally ignores its reader parameter and returns the pre-read length.
     read_bytes(r, |_| Ok(length))
 }
 
