@@ -15,6 +15,26 @@ use std::time::Duration;
 use tracing::Level;
 use tracing_subscriber::{filter, layer::SubscriberExt, util::SubscriberInitExt};
 
+/// Example client that discovers a NetherNet server on the local network, connects, exchanges
+/// several test packets (including a large segmented payload), and then closes the connection.
+///
+/// This binary:
+/// - Initializes tracing for stdout at DEBUG level.
+/// - Generates a unique 64-bit network ID and binds signaling to an ephemeral local port.
+/// - Waits for LAN server discovery, selects the first discovered server, and resolves its address.
+/// - Establishes a NethernetStream connection to the server, sends ten small test messages and
+///   logs their echoed responses, then sends a 20 KB payload to demonstrate segmentation.
+/// - Closes the connection gracefully.
+///
+/// # Examples
+///
+/// ```no_run
+/// // Runs the example client (requires a running NetherNet server on the LAN).
+/// tokio::runtime::Runtime::new().unwrap().block_on(async {
+///     // If `main` is in the current crate root:
+///     crate::main().await.unwrap();
+/// });
+/// ```
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stdout);

@@ -45,6 +45,22 @@ impl ManagedSession {
         }
     }
 
+    /// Queues a ConnectedPing control packet and records ping state using the provided time.
+    ///
+    /// The function computes the RakNet timestamp for `now`, enqueues a `ConnectedPing` packet
+    /// with `Unreliable` reliability and `Immediate` priority, sets `last_ping_sent` to `now`,
+    /// and stores the ping nonce derived from the timestamp.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use std::time::Instant;
+    /// # // create a ManagedSession named `session` in a connected state for the example
+    /// let mut session = /* ManagedSession::new_connected(...) */ todo!();
+    /// let now = Instant::now();
+    /// session.send_connected_ping(now);
+    /// // after calling, session.last_ping_sent is Some(now) and current_ping_nonce is set
+    /// ```
     pub(crate) fn send_connected_ping(&mut self, now: Instant) {
         let timestamp = Self::current_raknet_time(now);
 
@@ -57,6 +73,28 @@ impl ManagedSession {
         self.current_ping_nonce = Some(timestamp.0);
     }
 
+    /// Enforces the configured maximum for queued reliable bytes and closes the session if exceeded.
+    ///
+    /// If a `max_queued_reliable_bytes` limit is configured and the current `queued_reliable_bytes`
+    /// exceeds that limit, the session will be disconnected with reason `QueueTooLong`, the connection
+    /// state will be set to `Closed`, and `last_disconnect_reason` will be recorded.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Construct a session whose queued_reliable_bytes exceed the configured limit,
+    /// // then enforce the limit and observe the session is closed.
+    /// let mut sess = ManagedSession {
+    ///     config: Config { max_queued_reliable_bytes: Some(100), ..Default::default() },
+    ///     queued_reliable_bytes: 200,
+    ///     state: ConnectionState::Connected,
+    ///     last_disconnect_reason: None,
+    ///     ..Default::default()
+    /// };
+    /// sess.enforce_queue_limit();
+    /// assert_eq!(sess.state, ConnectionState::Closed);
+    /// assert_eq!(sess.last_disconnect_reason, Some(DisconnectReason::QueueTooLong));
+    /// ```
     pub(crate) fn enforce_queue_limit(&mut self) {
         if let Some(limit) = self.config.max_queued_reliable_bytes {
             if self.queued_reliable_bytes > limit {

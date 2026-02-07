@@ -22,12 +22,50 @@ static ENCRYPTION_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
     key
 });
 
-/// Returns a static reference to the encryption key.
+/// Access the module's static 32-byte encryption key.
+
+///
+
+/// The key is computed once at initialization and cached; this function returns
+
+/// a static reference to that 32-byte key for use in encryption and HMAC.
+
+///
+
+/// # Examples
+
+///
+
+/// ```
+
+/// let k1 = encryption_key();
+
+/// let k2 = encryption_key();
+
+/// // Both calls yield the same 32-byte key content and the same static reference.
+
+/// assert_eq!(k1, k2);
+
+/// assert_eq!(k1.len(), 32);
+
+/// ```
 pub(crate) fn encryption_key() -> &'static [u8; 32] {
     &ENCRYPTION_KEY
 }
 
-/// Encrypts the content of the bytes using AES-ECB with PKCS7 padding.
+/// Encrypts the given bytes using AES-256 in ECB mode with PKCS#7 padding.
+///
+/// The input is padded to a 16-byte boundary and each block is encrypted in place; the returned
+/// `Vec<u8>` contains the ciphertext whose length is a multiple of 16 bytes.
+///
+/// # Examples
+///
+/// ```
+/// let plaintext = b"nethernet";
+/// let ciphertext = crate::protocol::packet::discovery::crypto::encrypt(plaintext).unwrap();
+/// assert!(ciphertext.len() % 16 == 0);
+/// assert_ne!(ciphertext, plaintext);
+/// ```
 pub(crate) fn encrypt(data: &[u8]) -> Result<Vec<u8>> {
     let key = encryption_key();
     let cipher = Aes256::new(key.into());
@@ -47,7 +85,18 @@ pub(crate) fn encrypt(data: &[u8]) -> Result<Vec<u8>> {
     Ok(padded)
 }
 
-/// Decrypts the content of the bytes using AES-ECB with PKCS7 padding.
+/// Decrypts a byte slice that was encrypted with AES-256-ECB and PKCS#7 padding.
+///
+/// Returns the decrypted plaintext on success. Returns an error if the input length is zero or not a multiple of 16, or if PKCS#7 padding is invalid.
+///
+/// # Examples
+///
+/// ```
+/// let plaintext = b"example";
+/// let ciphertext = super::encrypt(plaintext).unwrap();
+/// let decrypted = super::decrypt(&ciphertext).unwrap();
+/// assert_eq!(decrypted, plaintext);
+/// ```
 pub(crate) fn decrypt(data: &[u8]) -> Result<Vec<u8>> {
     let key = encryption_key();
     let cipher = Aes256::new(key.into());
@@ -87,7 +136,16 @@ pub(crate) fn decrypt(data: &[u8]) -> Result<Vec<u8>> {
     Err(NethernetError::Other("Invalid padding".to_string()))
 }
 
-/// Computes the HMAC-SHA256 checksum for the given data.
+/// Computes an HMAC-SHA256 checksum of the provided data using the module's static encryption key.
+///
+/// Returns a 32-byte HMAC-SHA256 value.
+///
+/// # Examples
+///
+/// ```
+/// let sum = nethernet::protocol::packet::discovery::crypto::compute_checksum(b"hello");
+/// assert_eq!(sum.len(), 32);
+/// ```
 pub(crate) fn compute_checksum(data: &[u8]) -> [u8; 32] {
     let key = encryption_key();
     let mut mac =
@@ -99,7 +157,22 @@ pub(crate) fn compute_checksum(data: &[u8]) -> [u8; 32] {
     checksum
 }
 
-/// Verifies the HMAC-SHA256 checksum for the given data.
+/// Verifies that `data` matches the given HMAC-SHA256 `expected` checksum using the module's encryption key.
+///
+/// # Examples
+///
+/// ```
+/// let data = b"hello";
+/// let expected = compute_checksum(data);
+/// assert!(verify_checksum(data, &expected));
+/// let mut wrong = expected;
+/// wrong[0] ^= 0xff;
+/// assert!(!verify_checksum(data, &wrong));
+/// ```
+///
+/// # Returns
+///
+/// `true` if `expected` matches the HMAC-SHA256 of `data`, `false` otherwise.
 pub(crate) fn verify_checksum(data: &[u8], expected: &[u8; 32]) -> bool {
     let key = encryption_key();
     let mut mac =

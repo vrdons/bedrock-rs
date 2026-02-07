@@ -21,11 +21,28 @@ pub struct Session {
 }
 
 impl Session {
+    /// Create a Session using the default packet channel capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::sync::Arc;
+    /// // `pc` should be an initialized `RTCPeerConnection`
+    /// let pc: Arc<webrtc::peer_connection::RTCPeerConnection> = Arc::new(/* ... */);
+    /// let session = Session::new(pc);
+    /// ```
     pub fn new(peer_connection: Arc<RTCPeerConnection>) -> Self {
         Self::with_capacity(peer_connection, DEFAULT_PACKET_CHANNEL_CAPACITY)
     }
 
-    /// Creates a new session with a custom packet channel capacity
+    /// Creates a Session backed by the given RTCPeerConnection and a bounded packet channel with the specified capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let pc = Arc::new(RTCPeerConnection::new());
+    /// let session = Session::with_capacity(pc, 32);
+    /// ```
     pub fn with_capacity(peer_connection: Arc<RTCPeerConnection>, capacity: usize) -> Self {
         let (packet_tx, packet_rx) = mpsc::channel(capacity);
 
@@ -40,7 +57,27 @@ impl Session {
         }
     }
 
-    /// Sets the reliable data channel
+    /// Attach a reliable RTCDataChannel to the session and route incoming message segments into the session's reassembly pipeline.
+    ///
+    /// The provided channel will receive an `on_message` handler that decodes incoming bytes as `MessageSegment`s, accumulates segments in the session's internal buffer, and forwards completed messages to the session's packet receiver. The channel is then stored as the session's reliable data channel.
+    ///
+    /// # Parameters
+    ///
+    /// - `channel` — an `Arc<RTCDataChannel>` to be used for reliable, ordered delivery and inbound message handling.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, or an error variant of `NethernetError` if the operation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use std::sync::Arc;
+    /// # async fn example(session: &nethernet::session::Session, channel: Arc<webrtc::data_channel::RTCDataChannel>) -> nethernet::Result<()> {
+    /// session.set_reliable_channel(channel).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn set_reliable_channel(&self, channel: Arc<RTCDataChannel>) -> Result<()> {
         let message_buffer = self.message_buffer.clone();
         let packet_tx = self.packet_tx.clone();
@@ -88,13 +125,46 @@ impl Session {
         Ok(())
     }
 
-    /// Sets the unreliable data channel
+    /// Attaches an unreliable RTC data channel to the session.
+    ///
+    /// Replaces any previously set unreliable data channel with the provided one.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::sync::Arc;
+    /// use webrtc::data::data_channel::RTCDataChannel;
+    ///
+    /// async fn example(session: &Session, channel: Arc<RTCDataChannel>) {
+    ///     session.set_unreliable_channel(channel).await.unwrap();
+    /// }
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success.
     pub async fn set_unreliable_channel(&self, channel: Arc<RTCDataChannel>) -> Result<()> {
         *self.unreliable_channel.lock().await = Some(channel);
         Ok(())
     }
 
-    /// Sends a message
+    /// Send data over the session using the reliable data channel, splitting the payload into protocol segments as needed.
+    ///
+    /// # Errors
+    ///
+    /// - Returns `NethernetError::ConnectionClosed` if the session has been closed.
+    /// - Returns `NethernetError::DataChannel(...)` if the reliable channel is not set or if sending a segment fails.
+    /// - Returns any error produced by `Message::split_into_segments` when segmenting the input.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # async fn example(session: &nethernet::session::Session) -> Result<(), Box<dyn std::error::Error>> {
+    /// let data = bytes::Bytes::from("hello world");
+    /// session.send(data).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn send(&self, data: Bytes) -> Result<()> {
         if *self.closed.read().await {
             return Err(NethernetError::ConnectionClosed);
@@ -120,11 +190,32 @@ impl Session {
         Ok(())
     }
 
-    /// Receives a message
+    /// Receive the next complete packet from the session.
     ///
-    /// Note: This method temporarily takes ownership of the receiver to avoid
-    /// holding the Mutex guard across an await point. If another caller attempts
-    /// to recv() while a recv() is already in progress, they will receive an error.
+    /// This returns the next reassembled message produced by the session's incoming
+    /// segment stream. If the session has been closed, or the underlying packet
+    /// channel has been closed, this returns `Ok(None)`.
+    ///
+    /// Errors:
+    /// - Returns `Err(NethernetError::DataChannel(...))` if another caller is
+    ///   already awaiting `recv()` (the receiver is temporarily taken to avoid
+    ///   holding a lock across an await point).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use std::sync::Arc;
+    /// # use bytes::Bytes;
+    /// # use nethernet::session::Session;
+    /// # use webrtc::peer_connection::RTCPeerConnection;
+    /// # async fn example(pc: Arc<RTCPeerConnection>, session: &Session) {
+    /// if let Ok(Some(bytes)) = session.recv().await {
+    ///     // handle bytes
+    /// } else {
+    ///     // session closed or channel closed
+    /// }
+    /// # }
+    /// ```
     pub async fn recv(&self) -> Result<Option<Bytes>> {
         if *self.closed.read().await {
             return Ok(None);
@@ -147,7 +238,23 @@ impl Session {
         Ok(result)
     }
 
-    /// Closes the session
+    /// Shuts down the session by marking it closed and closing any attached data channels and the peer connection.
+    ///
+    /// After this call the session is considered closed; calling `close` again is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(NethernetError::WebRtc)` if closing the underlying peer connection fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use std::sync::Arc;
+    /// # use nethernet::session::Session;
+    /// # async fn example(session: Arc<Session>) {
+    /// session.close().await.unwrap();
+    /// # }
+    /// ```
     pub async fn close(&self) -> Result<()> {
         let mut closed = self.closed.write().await;
         if *closed {
@@ -175,17 +282,55 @@ impl Session {
         Ok(())
     }
 
-    /// Checks connection state
+    /// Return the current ICE connection state of the underlying peer connection.
+    ///
+    /// This reflects the latest RTCPeerConnection ICE state (e.g., `Connected`, `Disconnected`, `Failed`).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// // given a `session: Session`
+    /// let state = session.connection_state();
+    /// println!("ICE state: {:?}", state);
+    /// ```
     pub fn connection_state(&self) -> RTCIceConnectionState {
         self.peer_connection.ice_connection_state()
     }
 
-    /// Returns the peer connection
+    /// Gets a clone of the session's RTCPeerConnection.
+    ///
+    /// # Returns
+    ///
+    /// An `Arc<RTCPeerConnection>` pointing to the session's peer connection.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use std::sync::Arc;
+    /// # use webrtc::peer_connection::RTCPeerConnection;
+    /// # fn example(session: &crate::session::Session) {
+    /// let pc = session.peer_connection();
+    /// let _clone = Arc::clone(&pc);
+    /// # }
+    /// ```
     pub fn peer_connection(&self) -> Arc<RTCPeerConnection> {
         self.peer_connection.clone()
     }
 
-    /// Checks if the session is closed
+    /// Reports whether the session has been closed.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the session is closed, `false` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # async fn example(session: &nethernet::session::Session) {
+    /// let closed = session.is_closed().await;
+    /// println!("closed: {}", closed);
+    /// # }
+    /// ```
     pub async fn is_closed(&self) -> bool {
         *self.closed.read().await
     }

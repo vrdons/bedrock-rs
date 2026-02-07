@@ -36,7 +36,28 @@ pub struct ServerData {
 }
 
 impl ServerData {
-    /// Creates a new ServerData with default values.
+    /// Constructs a ServerData for the given server and level names using sensible defaults.
+    ///
+    /// server_name: the server owner or player name.
+    /// level_name: the world or level name.
+    ///
+    /// Defaults:
+    /// - game_type = 0 (Survival)
+    /// - player_count = 1
+    /// - max_player_count = 8
+    /// - editor_world = false
+    /// - hardcore = false
+    /// - transport_layer = 2 (NetherNet)
+    /// - connection_type = 4 (LAN)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let sd = ServerData::new("Alice".to_string(), "MyWorld".to_string());
+    /// assert_eq!(sd.server_name, "Alice");
+    /// assert_eq!(sd.level_name, "MyWorld");
+    /// assert_eq!(sd.game_type, 0);
+    /// ```
     pub fn new(server_name: String, level_name: String) -> Self {
         Self {
             server_name,
@@ -51,7 +72,18 @@ impl ServerData {
         }
     }
 
-    /// Encodes ServerData to binary format.
+    /// Encode the ServerData into the binary format used for discovery ResponsePacket.ApplicationData.
+    ///
+    /// Returns a vector of bytes on success or a NethernetError if encoding fails (for example,
+    /// if a field value would overflow its encoded form or an I/O write fails).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let sd = ServerData::new("owner".to_string(), "level".to_string());
+    /// let bytes = sd.marshal().unwrap();
+    /// assert!(!bytes.is_empty());
+    /// ```
     pub fn marshal(&self) -> Result<Vec<u8>> {
         // Validate fields that will be shifted to prevent overflow
         if self.game_type >= 128 {
@@ -102,7 +134,24 @@ impl ServerData {
         Ok(buf)
     }
 
-    /// Decodes ServerData from binary format.
+    /// Decode a ServerData value from its binary representation.
+    ///
+    /// The function verifies the embedded version, reads each field in the expected
+    /// order (version, u8-prefixed server and level names, game type, player counts,
+    /// booleans, transport layer, connection type), validates UTF-8 for string
+    /// fields, and ensures no unread bytes remain. On success returns a populated
+    /// ServerData; on failure returns a NethernetError describing the problem.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use nethernet::protocol::packet::discovery::ServerData;
+    /// let sd = ServerData::new("owner".into(), "world".into());
+    /// let bytes = sd.marshal().expect("marshal failed");
+    /// let decoded = ServerData::unmarshal(&bytes).expect("unmarshal failed");
+    /// assert_eq!(sd.server_name, decoded.server_name);
+    /// assert_eq!(sd.level_name, decoded.level_name);
+    /// ```
     pub fn unmarshal(data: &[u8]) -> Result<Self> {
         let mut cursor = Cursor::new(data);
 

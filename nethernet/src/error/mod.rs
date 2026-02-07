@@ -123,6 +123,18 @@ pub enum SignalErrorCode {
 }
 
 impl From<u32> for SignalErrorCode {
+    /// Map a numeric signal error code to the corresponding `SignalErrorCode` variant.
+    ///
+    /// The provided `u32` value is interpreted as the protocol's numeric error code;
+    /// known codes 0..=26 map to their specific variants and any other value maps to
+    /// `SignalErrorCode::SignalingUnknownError`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let v = SignalErrorCode::from(1u32);
+    /// assert_eq!(v, SignalErrorCode::DestinationNotLoggedIn);
+    /// ```
     fn from(code: u32) -> Self {
         match code {
             0 => SignalErrorCode::None,
@@ -158,6 +170,16 @@ impl From<u32> for SignalErrorCode {
 }
 
 impl From<SignalErrorCode> for u32 {
+    /// Convert a `SignalErrorCode` into its numeric `u32` representation.
+    ///
+    /// The returned value is the discriminant of the enum as defined by `repr(u32)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let n: u32 = u32::from(SignalErrorCode::Ice);
+    /// assert_eq!(n, SignalErrorCode::Ice as u32);
+    /// ```
     fn from(code: SignalErrorCode) -> Self {
         code as u32
     }

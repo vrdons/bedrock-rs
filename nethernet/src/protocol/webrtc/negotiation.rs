@@ -33,9 +33,29 @@ pub enum NegotiationMessage {
 }
 
 impl NegotiationMessage {
-    /// Parses a negotiation message from string format.
+    /// Parse a negotiation message from its wire-format string.
     ///
-    /// Format: `MESSAGETYPE CONNECTIONID DATA`
+    /// The expected wire format is:
+    /// `MESSAGETYPE CONNECTIONID DATA`
+    /// where `DATA` is the payload specific to the message type:
+    /// - `CONNECTREQUEST` — SDP offer
+    /// - `CONNECTRESPONSE` — SDP answer
+    /// - `CANDIDATEADD` — ICE candidate
+    /// - `CONNECTERROR` — numeric error code
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let txt = "CONNECTREQUEST 42 v=0\r\n...";
+    /// let msg = nethernet::protocol::webrtc::negotiation::NegotiationMessage::parse(txt).unwrap();
+    /// assert_eq!(msg.connection_id(), 42);
+    /// match msg {
+    ///     nethernet::protocol::webrtc::negotiation::NegotiationMessage::ConnectRequest { sdp_offer, .. } => {
+    ///         assert!(sdp_offer.starts_with("v="));
+    ///     }
+    ///     _ => panic!("unexpected variant"),
+    /// }
+    /// ```
     pub fn parse(s: &str) -> Result<Self> {
         let parts: Vec<&str> = s.splitn(3, ' ').collect();
         if parts.len() < 2 {
@@ -102,7 +122,19 @@ impl NegotiationMessage {
         }
     }
 
-    /// Returns the connection ID of the message.
+    /// Get the connection identifier associated with the message.
+    ///
+    /// Returns the message's connection ID.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let msg = NegotiationMessage::ConnectRequest {
+    ///     connection_id: 42,
+    ///     sdp_offer: "v=0".into(),
+    /// };
+    /// assert_eq!(msg.connection_id(), 42);
+    /// ```
     pub fn connection_id(&self) -> u64 {
         match self {
             Self::ConnectRequest { connection_id, .. }
@@ -112,7 +144,18 @@ impl NegotiationMessage {
         }
     }
 
-    /// Returns the message type as a string.
+    /// Return the canonical message type name for this negotiation message.
+    ///
+    /// # Returns
+    ///
+    /// A `&'static str` containing one of: `"CONNECTREQUEST"`, `"CONNECTRESPONSE"`, `"CANDIDATEADD"`, or `"CONNECTERROR"`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let msg = NegotiationMessage::ConnectRequest { connection_id: 1, sdp_offer: String::from("offer") };
+    /// assert_eq!(msg.message_type(), "CONNECTREQUEST");
+    /// ```
     pub fn message_type(&self) -> &'static str {
         match self {
             Self::ConnectRequest { .. } => "CONNECTREQUEST",
@@ -124,6 +167,26 @@ impl NegotiationMessage {
 }
 
 impl fmt::Display for NegotiationMessage {
+    /// Formats the negotiation message into the canonical wire-format string.
+    ///
+    /// The output is one of:
+    /// - `CONNECTREQUEST <connection_id> <sdp_offer>`
+    /// - `CONNECTRESPONSE <connection_id> <sdp_answer>`
+    /// - `CANDIDATEADD <connection_id> <candidate>`
+    /// - `CONNECTERROR <connection_id> <error_code>`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::fmt::Write;
+    ///
+    /// let msg = crate::protocol::webrtc::negotiation::NegotiationMessage::ConnectRequest {
+    ///     connection_id: 42,
+    ///     sdp_offer: "offer".into(),
+    /// };
+    /// let s = msg.to_string();
+    /// assert_eq!(s, "CONNECTREQUEST 42 offer");
+    /// ```
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ConnectRequest {

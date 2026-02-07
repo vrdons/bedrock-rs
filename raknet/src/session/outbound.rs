@@ -342,6 +342,26 @@ impl Session {
         size
     }
 
+    /// Tracks a sent datagram for retransmission and returns a shared outgoing view.
+    ///
+    /// Records the datagram's send time and next retransmit time, notifies the sliding
+    /// window if the datagram contains reliable encapsulated packets, and stores the
+    /// tracked datagram indexed by the provided sequence number.
+    ///
+    /// # Returns
+    ///
+    /// An `OutgoingDatagram::Shared` containing an `Arc` to the stored datagram.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Prepare `session`, `datagram`, `seq`, and `now` appropriately in your test setup.
+    /// let out = session.track_sent_datagram(datagram, seq, now);
+    /// match out {
+    ///     OutgoingDatagram::Shared(_) => {},
+    ///     _ => panic!("expected a shared outgoing datagram"),
+    /// }
+    /// ```
     fn track_sent_datagram(
         &mut self,
         dgram: Datagram,

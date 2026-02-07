@@ -13,6 +13,16 @@ pub struct MessageSegment {
 }
 
 impl MessageSegment {
+    /// Creates a MessageSegment with the given remaining segment count and payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bytes::Bytes;
+    /// let seg = nethernet::protocol::message::MessageSegment::new(2, Bytes::from("payload"));
+    /// assert_eq!(seg.remaining_segments, 2);
+    /// assert_eq!(&seg.data[..], b"payload");
+    /// ```
     pub fn new(remaining_segments: u8, data: Bytes) -> Self {
         Self {
             remaining_segments,
@@ -20,7 +30,18 @@ impl MessageSegment {
         }
     }
 
-    /// Encodes the segment to bytes
+    /// Serialize the segment into a byte buffer where the first byte is the remaining segment count and the rest is the payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bytes::Bytes;
+    /// // construct a segment with 2 remaining segments and payload "abc"
+    /// let seg = MessageSegment::new(2, Bytes::from("abc"));
+    /// let encoded = seg.encode();
+    /// assert_eq!(encoded[0], 2);
+    /// assert_eq!(&encoded[1..], b"abc");
+    /// ```
     pub fn encode(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(1 + self.data.len());
         buf.put_u8(self.remaining_segments);
@@ -28,7 +49,22 @@ impl MessageSegment {
         buf.freeze()
     }
 
-    /// Decodes a segment from bytes
+    /// Decode a MessageSegment from a byte slice.
+    ///
+    /// Interprets the first byte as `remaining_segments` and the remainder as the segment payload.
+    /// Returns an error if the slice is shorter than 2 bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bytes::Bytes;
+    /// use nethernet::protocol::message::MessageSegment;
+    ///
+    /// let raw: Vec<u8> = vec![2u8, 1, 2, 3];
+    /// let seg = MessageSegment::decode(&raw).unwrap();
+    /// assert_eq!(seg.remaining_segments, 2);
+    /// assert_eq!(seg.data, Bytes::from(&raw[1..][..]));
+    /// ```
     pub fn decode(data: &[u8]) -> Result<Self> {
         if data.len() < 2 {
             return Err(NethernetError::MessageParse(
@@ -54,6 +90,15 @@ pub struct Message {
 }
 
 impl Message {
+    /// Creates a new, empty Message ready to receive segments.
+    ///
+    /// The returned Message is initialized to expect no segments and has an empty internal buffer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let _msg = Message::new();
+    /// ```
     pub fn new() -> Self {
         Self {
             expected_segments: 0,
@@ -61,7 +106,26 @@ impl Message {
         }
     }
 
-    /// Adds a segment and checks if the message is complete
+    /// Adds a segment to the current message accumulator and returns the complete message when assembly finishes.
+    ///
+    /// This validates segment sequencing, appends the segment payload to the internal buffer, and resets internal state when a complete message is produced. If a segment is out of the expected order the accumulator is cleared and a `MessageParse` error is returned.
+    ///
+    /// # Returns
+    ///
+    /// `Some(Bytes)` containing the reassembled message when the added segment completes the message, `None` if more segments are expected, or an error if segments are out of sequence.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bytes::Bytes;
+    ///
+    /// let mut msg = Message::new();
+    /// let first = MessageSegment::new(1, Bytes::from("Hello, "));
+    /// assert_eq!(msg.add_segment(first).unwrap(), None);
+    /// let last = MessageSegment::new(0, Bytes::from("world"));
+    /// let assembled = msg.add_segment(last).unwrap().unwrap();
+    /// assert_eq!(assembled, Bytes::from("Hello, world"));
+    /// ```
     pub fn add_segment(&mut self, segment: MessageSegment) -> Result<Option<Bytes>> {
         // Set expected_segments if this is the first segment
         if self.expected_segments == 0 && segment.remaining_segments > 0 {
@@ -96,7 +160,35 @@ impl Message {
         }
     }
 
-    /// Splits the message into segments
+    /// Splits a byte buffer into protocol-sized message segments.
+    ///
+    /// For inputs shorter than or equal to MAX_MESSAGE_SIZE this returns a single
+    /// segment with `remaining_segments` equal to 0. For longer inputs the data
+    /// is chunked into segments of at most MAX_MESSAGE_SIZE bytes; the first
+    /// returned segment has `remaining_segments = segment_count - 1` and the last
+    /// has `remaining_segments = 0`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `NethernetError::MessageTooLarge(size)` if the number of required
+    /// segments exceeds 255 and cannot be represented in a `u8`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bytes::Bytes;
+    /// // small message -> single segment
+    /// let small = Bytes::from("hello");
+    /// let segments = crate::protocol::message::Message::split_into_segments(small).unwrap();
+    /// assert_eq!(segments.len(), 1);
+    /// assert_eq!(segments[0].remaining_segments, 0);
+    ///
+    /// // large message -> multiple segments, descending remaining_segments
+    /// let large = Bytes::from(vec![0u8; crate::protocol::constants::MAX_MESSAGE_SIZE * 2 + 10]);
+    /// let segments = crate::protocol::message::Message::split_into_segments(large).unwrap();
+    /// assert!(segments.len() >= 2);
+    /// assert!(segments.first().unwrap().remaining_segments > segments.last().unwrap().remaining_segments);
+    /// ```
     pub fn split_into_segments(data: Bytes) -> Result<Vec<MessageSegment>> {
         if data.len() <= MAX_MESSAGE_SIZE {
             return Ok(vec![MessageSegment::new(0, data)]);
@@ -127,6 +219,17 @@ impl Message {
 }
 
 impl Default for Message {
+    /// Creates a new `Message` initialized for assembling or emitting segmented messages.
+    ///
+    /// # Returns
+    ///
+    /// A `Message` with an empty buffer and no expected segments.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let _msg = Message::default();
+    /// ```
     fn default() -> Self {
         Self::new()
     }

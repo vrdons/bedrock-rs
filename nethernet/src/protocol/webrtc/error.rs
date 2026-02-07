@@ -67,7 +67,18 @@ pub enum ConnectError {
 }
 
 impl ConnectError {
-    /// Converts from error code to ConnectError.
+    /// Map a numeric wire code to the corresponding `ConnectError` variant.
+    ///
+    /// Returns `Some(variant)` when `code` matches a defined wire discriminant, `None` for unknown codes (including the deliberate gap at `0x14`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let e = ConnectError::from_code(0x01);
+    /// assert_eq!(e, Some(ConnectError::DestinationNotLoggedIn));
+    ///
+    /// assert_eq!(ConnectError::from_code(0x14), None); // gap handling
+    /// ```
     pub fn from_code(code: u8) -> Option<Self> {
         match code {
             0x00 => Some(Self::None),
@@ -101,13 +112,39 @@ impl ConnectError {
         }
     }
 
-    /// Converts to error code.
+    /// Get the wire-format numeric code associated with this `ConnectError` variant.
+    ///
+    /// # Returns
+    ///
+    /// The numeric wire-format code for the variant.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let c = ConnectError::NegotiationTimeout;
+    /// assert_eq!(c.code(), 0x02);
+    /// ```
     pub fn code(&self) -> u8 {
         *self as u8
     }
 }
 
 impl From<crate::error::SignalErrorCode> for ConnectError {
+    /// Convert a `SignalErrorCode` into the corresponding `ConnectError` variant.
+    ///
+    /// The mapping preserves the logical error semantics while adapting from the
+    /// signal-layer representation to the WebRTC wire-format representation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crate::error::SignalErrorCode;
+    /// use crate::protocol::webrtc::error::ConnectError;
+    ///
+    /// let sig = SignalErrorCode::SignalingUnicastMessageDeliveryFailed;
+    /// let conn: ConnectError = sig.into();
+    /// assert_eq!(conn, ConnectError::SignalingUnicastMessageDeliveryFailed);
+    /// ```
     fn from(code: crate::error::SignalErrorCode) -> Self {
         use crate::error::SignalErrorCode as S;
         match code {
@@ -143,6 +180,17 @@ impl From<crate::error::SignalErrorCode> for ConnectError {
 }
 
 impl From<ConnectError> for crate::error::SignalErrorCode {
+    /// Convert a `ConnectError` into its corresponding `crate::error::SignalErrorCode`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crate::protocol::webrtc::error::ConnectError;
+    /// use crate::error::SignalErrorCode;
+    ///
+    /// let s: SignalErrorCode = ConnectError::DestinationNotLoggedIn.into();
+    /// assert_eq!(s, SignalErrorCode::DestinationNotLoggedIn);
+    /// ```
     fn from(error: ConnectError) -> Self {
         use crate::error::SignalErrorCode as S;
         match error {

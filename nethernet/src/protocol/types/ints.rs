@@ -5,12 +5,42 @@ use std::io::{self, Read, Write};
 pub struct U16LE(pub u16);
 
 impl U16LE {
+    /// Reads a little-endian 16-bit unsigned integer from the given reader.
+    ///
+    /// On success returns a `U16LE` wrapping the decoded `u16`. Propagates any I/O error encountered while reading.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io::Cursor;
+    /// let data = [0xCD, 0xAB]; // 0xABCD little-endian
+    /// let mut cursor = Cursor::new(&data);
+    /// let val = super::U16LE::read(&mut cursor).unwrap();
+    /// assert_eq!(val.0, 0xABCD);
+    /// ```
     pub fn read<R: Read + ?Sized>(r: &mut R) -> io::Result<Self> {
         let mut buf = [0u8; 2];
         r.read_exact(&mut buf)?;
         Ok(U16LE(u16::from_le_bytes(buf)))
     }
 
+    /// Writes the wrapped integer to the provided writer in little-endian byte order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io::Cursor;
+    ///
+    /// let val = U16LE(0xABCD);
+    /// let mut buf = Vec::new();
+    /// val.write(&mut buf).unwrap();
+    /// assert_eq!(buf, vec![0xCD, 0xAB]);
+    ///
+    /// let mut cursor = Cursor::new(buf);
+    /// let mut read_buf = [0u8; 2];
+    /// cursor.read_exact(&mut read_buf).unwrap();
+    /// assert_eq!(read_buf, [0xCD, 0xAB]);
+    /// ```
     pub fn write<W: Write + ?Sized>(&self, w: &mut W) -> io::Result<()> {
         w.write_all(&self.0.to_le_bytes())
     }
@@ -21,12 +51,43 @@ impl U16LE {
 pub struct U32LE(pub u32);
 
 impl U32LE {
+    /// Reads a 32-bit little-endian unsigned integer from a reader.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io::Cursor;
+    /// let mut c = Cursor::new(vec![0x78, 0x56, 0x34, 0x12]);
+    /// let val = U32LE::read(&mut c).unwrap();
+    /// assert_eq!(val.0, 0x12345678);
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// `U32LE` containing the decoded little-endian `u32` value.
     pub fn read<R: Read + ?Sized>(r: &mut R) -> io::Result<Self> {
         let mut buf = [0u8; 4];
         r.read_exact(&mut buf)?;
         Ok(U32LE(u32::from_le_bytes(buf)))
     }
 
+    /// Writes the wrapped integer to the provided writer in little-endian byte order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io::Cursor;
+    ///
+    /// let val = U16LE(0xABCD);
+    /// let mut buf = Vec::new();
+    /// val.write(&mut buf).unwrap();
+    /// assert_eq!(buf, vec![0xCD, 0xAB]);
+    ///
+    /// let mut cursor = Cursor::new(buf);
+    /// let mut read_buf = [0u8; 2];
+    /// cursor.read_exact(&mut read_buf).unwrap();
+    /// assert_eq!(read_buf, [0xCD, 0xAB]);
+    /// ```
     pub fn write<W: Write + ?Sized>(&self, w: &mut W) -> io::Result<()> {
         w.write_all(&self.0.to_le_bytes())
     }
@@ -37,12 +98,41 @@ impl U32LE {
 pub struct U64LE(pub u64);
 
 impl U64LE {
+    /// Reads a little-endian 64-bit unsigned integer from a reader.
+    ///
+    /// On success returns a `U64LE` containing the decoded value. Propagates any I/O error encountered while reading the required 8 bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io::Cursor;
+    /// let mut buf = Cursor::new(vec![0xF0, 0xDE, 0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12]);
+    /// let v = U64LE::read(&mut buf).unwrap();
+    /// assert_eq!(v.0, 0x123456789ABCDEF0);
+    /// ```
     pub fn read<R: Read + ?Sized>(r: &mut R) -> io::Result<Self> {
         let mut buf = [0u8; 8];
         r.read_exact(&mut buf)?;
         Ok(U64LE(u64::from_le_bytes(buf)))
     }
 
+    /// Writes the wrapped integer to the provided writer in little-endian byte order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io::Cursor;
+    ///
+    /// let val = U16LE(0xABCD);
+    /// let mut buf = Vec::new();
+    /// val.write(&mut buf).unwrap();
+    /// assert_eq!(buf, vec![0xCD, 0xAB]);
+    ///
+    /// let mut cursor = Cursor::new(buf);
+    /// let mut read_buf = [0u8; 2];
+    /// cursor.read_exact(&mut read_buf).unwrap();
+    /// assert_eq!(read_buf, [0xCD, 0xAB]);
+    /// ```
     pub fn write<W: Write + ?Sized>(&self, w: &mut W) -> io::Result<()> {
         w.write_all(&self.0.to_le_bytes())
     }

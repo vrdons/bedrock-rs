@@ -12,6 +12,24 @@ use std::net::SocketAddr;
 use tracing::Level;
 use tracing_subscriber::{filter, layer::SubscriberExt, util::SubscriberInitExt};
 
+/// Starts a NetherNet LAN-discoverable server that listens on 0.0.0.0:7551, responds to LAN discovery,
+/// accepts incoming WebRTC client connections, and echoes received packets back to each client.
+///
+/// The server configures TRACE-level tracing to stdout, advertises a randomly generated network ID
+/// and provided server metadata via LAN signaling, and spawns a dedicated task per client to handle
+/// that client's packet loop.
+///
+/// # Returns
+///
+/// Returns `Ok(())` on normal shutdown. Returns an error if initialization (tracing, signaling,
+/// listener binding) or I/O operations fail.
+///
+/// # Examples
+///
+/// ```no_run
+/// // Run the example server (typically executed as a binary or example)
+/// // cargo run --example server
+/// ```
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing with environment filter

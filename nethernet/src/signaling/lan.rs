@@ -40,6 +40,29 @@ struct AddressEntry {
 }
 
 impl LanSignaling {
+    /// Creates and starts a new LanSignaling instance bound to the given address.
+    ///
+    /// Binds a UDP socket to `bind_addr`, enables broadcast, initializes internal
+    /// shared state (address table, discovered servers, optional server pong data),
+    /// creates a broadcast channel for outbound signals, and spawns the background
+    /// task that handles incoming packets, periodic discovery, and cleanup.
+    ///
+    /// On success returns a configured `LanSignaling` instance ready to send and
+    /// receive LAN signaling messages; on failure returns the underlying I/O or
+    /// setup error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use std::net::SocketAddr;
+    /// # use tokio;
+    /// # async fn doc() -> Result<(), Box<dyn std::error::Error>> {
+    /// let bind_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    /// let signaling = nethernet::signaling::lan::LanSignaling::new(42, bind_addr).await?;
+    /// // signaling is running and can be used to send/receive signals
+    /// drop(signaling);
+    /// # Ok(()) }
+    /// ```
     pub async fn new(network_id: u64, bind_addr: SocketAddr) -> Result<Self> {
         let socket = UdpSocket::bind(bind_addr).await?;
         socket.set_broadcast(true)?;
@@ -90,11 +113,37 @@ impl LanSignaling {
         Ok(signaling)
     }
 
+    /// Returns a snapshot of discovered servers keyed by their network ID.
+    ///
+    /// Clones and returns the current internal map of discovered `ServerData` entries.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use std::collections::HashMap;
+    /// # use nethernet::signaling::lan::LanSignaling;
+    /// # use nethernet::protocol::server::ServerData;
+    /// # async fn _example(lan: &LanSignaling) {
+    /// let discovered: HashMap<u64, ServerData> = lan.discover().await.unwrap();
+    /// # }
+    /// ```
     pub async fn discover(&self) -> Result<HashMap<u64, ServerData>> {
         Ok(self.discovered_servers.read().await.clone())
     }
 
-    /// Get the socket address for a given network ID
+    /// Return the last-known socket address for the given network ID, if any.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // `lan` is a `LanSignaling` instance created elsewhere.
+    /// let maybe_addr = lan.get_address(42).await;
+    /// if let Some(addr) = maybe_addr {
+    ///     println!("found address: {}", addr);
+    /// } else {
+    ///     println!("no known address for network id 42");
+    /// }
+    /// ```
     pub async fn get_address(&self, network_id: u64) -> Option<SocketAddr> {
         self.addresses
             .read()
@@ -103,7 +152,45 @@ impl LanSignaling {
             .map(|entry| entry.addr)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// Spawns a background Tokio task that maintains LAN signaling I/O and state.
+    ///
+    /// The spawned task receives and handles UDP packets, periodically removes stale peer addresses, optionally issues discovery requests to the provided broadcast address, and exits when `cancel_token` is triggered.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::SocketAddr;
+    /// use std::sync::Arc;
+    /// use tokio::task::JoinHandle;
+    /// use tokio::net::UdpSocket;
+    /// use tokio_util::sync::CancellationToken;
+    ///
+    /// // prepare the required arguments (omitted): network_id, socket, addresses, signal_tx,
+    /// // server_data, discovered_servers, broadcast_addr, cancel_token
+    ///
+    /// # async fn example_start(
+    /// #     network_id: u64,
+    /// #     socket: Arc<UdpSocket>,
+    /// #     addresses: Arc<()>,
+    /// #     signal_tx: (),
+    /// #     server_data: Arc<()> ,
+    /// #     discovered_servers: Arc<()>,
+    /// #     broadcast_addr: Option<SocketAddr>,
+    /// #     cancel_token: CancellationToken,
+    /// # ) {
+    /// let _handle: JoinHandle<()> = start_background_task(
+    ///     network_id,
+    ///     socket,
+    ///     // the following placeholders stand in for the real shared structures:
+    ///     unsafe { std::mem::transmute(addresses) },
+    ///     unsafe { std::mem::transmute(signal_tx) },
+    ///     server_data,
+    ///     unsafe { std::mem::transmute(discovered_servers) },
+    ///     broadcast_addr,
+    ///     cancel_token,
+    /// );
+    /// # }
+    /// ```
     fn start_background_task(
         network_id: u64,
         socket: Arc<UdpSocket>,
@@ -156,6 +243,28 @@ impl LanSignaling {
         })
     }
 
+    /// Sends a discovery request packet for the specified network to the given address.
+    ///
+    /// The function marshals a discovery request for `network_id` and sends it via `socket` to `addr`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # // hidden setup for the example
+    /// # use std::net::SocketAddr;
+    /// # use tokio::net::UdpSocket;
+    /// # let rt = tokio::runtime::Runtime::new().unwrap();
+    /// # rt.block_on(async {
+    /// #     let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    /// #     let addr: SocketAddr = "127.0.0.1:34254".parse().unwrap();
+    /// #     // Call the function to send a discovery request for network ID 42.
+    /// #     send_request(&socket, 42, addr).await.unwrap();
+    /// # });
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the request was marshaled and sent successfully, `Err(_)` if marshalling or sending failed.
     async fn send_request(socket: &UdpSocket, network_id: u64, addr: SocketAddr) -> Result<()> {
         let request = RequestPacket;
         let data = discovery::marshal(&request, network_id)?;
@@ -168,6 +277,33 @@ impl LanSignaling {
         Ok(())
     }
 
+    /// Handle an incoming discovery or message packet received over UDP.
+    ///
+    /// Updates the last-seen address for the packet's sender, ignores packets that originate
+    /// from this node, and processes packets by type:
+    /// - REQUEST: if local server data is configured, send a discovery response to the requester.
+    /// - RESPONSE: parse and store discovered ServerData into the discovered_servers map.
+    /// - MESSAGE: ignore ping tokens; if the message is addressed to this node, parse it into
+    ///   a Signal and broadcast it via the provided signal channel.
+    /// Logs and early-returns on unrecognized or malformed packets.
+    ///
+    /// # Arguments
+    ///
+    /// - `data`: raw bytes of the received UDP packet.
+    /// - `addr`: socket address of the packet sender.
+    /// - `own_network_id`: local network identifier used to ignore self-originating packets.
+    /// - `addresses`: map of known peer addresses updated with the sender's address and timestamp.
+    /// - `signal_tx`: broadcast sender used to publish received Signals to subscribers.
+    /// - `socket`: UDP socket used to send discovery responses.
+    /// - `server_data`: optional local ServerData used when replying to discovery requests.
+    /// - `discovered_servers`: map where parsed ServerData from responses are stored.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // Typical use occurs inside the background receive loop:
+    /// handle_packet(&buf[..n], sender_addr, own_network_id, &addresses, &signal_tx, &socket, &server_data, &discovered_servers).await?;
+    /// ```
     #[allow(clippy::too_many_arguments)]
     async fn handle_packet(
         data: &[u8],
@@ -314,6 +450,28 @@ impl LanSignaling {
         Ok(())
     }
 
+    /// Removes peer address entries whose `last_seen` timestamp is older than `ADDRESS_TIMEOUT`.
+    ///
+    /// This function acquires a write lock on the provided address map and retains only entries
+    /// observed within the configured timeout window, mutating the map in place.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use std::{sync::Arc, collections::HashMap, time::Instant, net::SocketAddr};
+    /// # use tokio::sync::RwLock as AsyncRwLock;
+    /// # // run within tokio runtime
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// let addresses = Arc::new(AsyncRwLock::new(HashMap::<u64, AddressEntry>::new()));
+    /// addresses.write().await.insert(1, AddressEntry {
+    ///     addr: "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
+    ///     last_seen: Instant::now(),
+    /// });
+    /// cleanup_addresses(&addresses).await;
+    /// assert!(addresses.read().await.contains_key(&1));
+    /// # }
+    /// ```
     async fn cleanup_addresses(addresses: &Arc<AsyncRwLock<HashMap<u64, AddressEntry>>>) {
         let mut addrs = addresses.write().await;
         addrs.retain(|_, entry| entry.last_seen.elapsed() < ADDRESS_TIMEOUT);
@@ -321,12 +479,37 @@ impl LanSignaling {
 }
 
 impl Drop for LanSignaling {
+    /// Cancels the internal background task when the instance is dropped.
+    ///
+    /// This Drop implementation signals the internal cancellation token so the
+    /// background task started by the instance can terminate promptly.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // When `lan` goes out of scope or is dropped, its background task is cancelled.
+    /// // let lan = LanSignaling::new(42, bind_addr).await.unwrap();
+    /// // drop(lan);
+    /// ```
     fn drop(&mut self) {
         self.cancel_token.cancel();
     }
 }
 
 impl Signaling for LanSignaling {
+    /// Sends a signaling message to the peer identified by the signal's `network_id`.
+    ///
+    /// Looks up the last-known socket address for the target network ID, serializes the signal
+    /// into a `MessagePacket`, and transmits it over the internal UDP socket.
+    ///
+    /// # Parameters
+    ///
+    /// - `signal`: the signal to send; its `network_id` field determines the destination peer.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, or an error if the network ID is invalid, the destination address is
+    /// unknown, serialization fails, or the UDP send fails.
     async fn signal(&self, signal: Signal) -> Result<()> {
         let network_id = signal
             .network_id
@@ -351,9 +534,23 @@ impl Signaling for LanSignaling {
         Ok(())
     }
 
-    /// Returns a signal stream - each call creates a new subscriber that receives all future signals.
-    /// Multiple callers (e.g., listener.rs and stream.rs) can each call this method to receive
-    /// their own copy of all broadcast signals without competing for messages.
+    /// Create a stream that yields incoming Signals for a new subscriber.
+    ///
+    /// Each call produces an independent stream that receives all future broadcasted
+    /// signals. If the subscriber falls behind, missed signals are skipped and a
+    /// warning is emitted; the stream ends if the broadcaster is closed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use futures::StreamExt;
+    /// # async fn example(lan: &nethernet::signaling::lan::LanSignaling) {
+    /// let mut stream = lan.signals();
+    /// if let Some(signal) = stream.next().await {
+    ///     // handle `signal`
+    /// }
+    /// # }
+    /// ```
     fn signals(&self) -> Pin<Box<dyn Stream<Item = Signal> + Send>> {
         let rx = self.signal_tx.subscribe();
         Box::pin(futures::stream::unfold(rx, |mut rx| async move {
@@ -370,10 +567,32 @@ impl Signaling for LanSignaling {
         }))
     }
 
+    /// Returns the local network identifier as a decimal string.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// // Given a LanSignaling instance `lan`, obtain its network id string:
+    /// // let lan = /* obtain LanSignaling instance */;
+    /// // let id_str = lan.network_id();
+    /// // assert_eq!(id_str, "42");
+    /// ```
     fn network_id(&self) -> String {
         self.network_id.to_string()
     }
 
+    /// Update the stored server "pong" data from marshalled bytes.
+    ///
+    /// Attempts to decode `data` into a `ServerData`. If decoding succeeds, the decoded value
+    /// replaces the currently stored server data; if decoding fails, the stored value is unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Given a `LanSignaling` instance `signaling` and a `ServerData` value:
+    /// let bytes = server_data.marshal();
+    /// signaling.set_pong_data(bytes);
+    /// ```
     fn set_pong_data(&self, data: Vec<u8>) {
         *self.server_data.write().unwrap_or_else(|e| e.into_inner()) =
             ServerData::unmarshal(&data).ok();

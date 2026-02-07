@@ -30,6 +30,17 @@ pub(super) struct PendingConnection {
     pub cookie: u32,
 }
 
+/// Determines whether a packet ID corresponds to a RakNet offline (unconnected) packet.
+///
+/// Recognized offline IDs are 0x01, 0x02, 0x05, and 0x07.
+///
+/// # Examples
+///
+/// ```
+/// assert!(is_offline_packet_id(0x01));
+/// assert!(is_offline_packet_id(0x07));
+/// assert!(!is_offline_packet_id(0x03));
+/// ```
 pub(super) fn is_offline_packet_id(id: u8) -> bool {
     matches!(id, 0x01 | 0x02 | 0x05 | 0x07)
 }

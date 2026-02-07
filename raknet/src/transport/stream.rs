@@ -55,7 +55,16 @@ pub struct RaknetStreamConfig {
 }
 
 impl Default for RaknetStreamConfig {
-    /// Default options for [`RaknetStreamConfig`].
+    /// Construct a RaknetStreamConfig populated with the library's default values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cfg = RaknetStreamConfig::default();
+    /// assert_eq!(cfg.connect_addr.port(), 19132);
+    /// assert_eq!(cfg.mtu, 1400);
+    /// assert_eq!(cfg.connection_timeout, std::time::Duration::from_secs(10));
+    /// ```
     fn default() -> Self {
         Self {
             connect_addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 19132)),
@@ -105,7 +114,22 @@ pub struct RaknetStreamConfigBuilder {
 }
 
 impl Default for RaknetStreamConfigBuilder {
-    /// Default options for [`RaknetStreamConfig`].
+    /// Creates a `RaknetStreamConfigBuilder` pre-populated with the library's default RakNet stream settings.
+    ///
+    /// The returned builder mirrors `RaknetStreamConfig::default()` for tunable fields and leaves `connect_addr` unset.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    ///
+    /// let mut builder = RaknetStreamConfigBuilder::default();
+    /// // set the required server address before building
+    /// builder = builder.connect_addr(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 19132));
+    /// let config = builder.build().expect("connect_addr must be set");
+    /// // defaults are applied (example: default MTU)
+    /// assert!(config.mtu >= 576 && config.mtu <= 1500);
+    /// ```
     fn default() -> Self {
         let config = RaknetStreamConfig::default();
         Self {
@@ -136,13 +160,43 @@ impl RaknetStreamConfigBuilder {
         self
     }
 
-    /// Sets the MTU size to attempt negotiation with.
+    /// Set the MTU (maximum transmission unit), in bytes, to propose during the connection handshake.
+    
+    ///
+    
+    /// The specified value is used when negotiating packet fragmentation and framing with the remote peer.
+    
+    ///
+    
+    /// # Examples
+    
+    ///
+    
+    /// ```
+    
+    /// let cfg = RaknetStreamConfig::builder().mtu(1400).build();
+    
+    /// ```
     pub fn mtu(mut self, mtu: u16) -> Self {
         self.mtu = mtu;
         self
     }
 
-    /// Sets the connection timeout duration.
+    /// Set the initial handshake timeout used when attempting to establish a connection.
+    ///
+    /// Returns the builder with the updated timeout.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// let cfg = RaknetStreamConfig::builder()
+    ///     .connect_addr("127.0.0.1:19132".parse().unwrap())
+    ///     .connection_timeout(Duration::from_secs(5))
+    ///     .build()
+    ///     .unwrap();
+    /// assert_eq!(cfg.connection_timeout, Duration::from_secs(5));
+    /// ```
     pub fn connection_timeout(mut self, timeout: Duration) -> Self {
         self.connection_timeout = timeout;
         self
@@ -190,7 +244,24 @@ impl RaknetStreamConfigBuilder {
         self
     }
 
-    /// Builds the [`RaknetStreamConfig`] from the builder.
+    /// Constructs a `RaknetStreamConfig` from this builder.
+    ///
+    /// The resulting config copies all tunable fields from the builder. The builder must have
+    /// a `connect_addr` set prior to calling this method; the function will panic if `connect_addr`
+    /// is missing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::net::{Ipv4Addr, SocketAddrV4};
+    /// let addr = SocketAddrV4::new(Ipv4Addr::new(127,0,0,1), 19132).into();
+    /// let cfg = crate::RaknetStreamConfigBuilder::default()
+    ///     .connect_addr(addr)
+    ///     .mtu(1400)
+    ///     .build();
+    /// assert_eq!(cfg.mtu, 1400);
+    /// assert_eq!(cfg.connect_addr, addr);
+    /// ```
     pub fn build(self) -> RaknetStreamConfig {
         let server = self
             .connect_addr
@@ -244,7 +315,25 @@ impl RaknetStream {
         }
     }
 
-    /// Connect to a RakNet server with a custom configuration.
+    /// Establishes a RakNet connection to the configured server and prepares a stream for sending and receiving messages.
+    ///
+    /// This performs the offline handshake (negotiating MTU and server GUID), spawns the background client muxer task, and returns a ready-to-use RaknetStream that delivers inbound messages and accepts outbound messages via its channels.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(RaknetStream)` if the connection was successfully established and the background muxer signaled readiness, `Err(RaknetError)` on failure.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # tokio::main
+    /// # async fn main() -> Result<(), crate::RaknetError> {
+    /// let config = crate::transport::stream::RaknetStreamConfig::default();
+    /// let stream = crate::transport::stream::RaknetStream::connect(config).await?;
+    /// // Use `stream` to send/receive RakNet messages...
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn connect(config: RaknetStreamConfig) -> Result<Self, crate::RaknetError> {
         let server = config.connect_addr;
         let bind_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
@@ -316,6 +405,14 @@ impl RaknetStream {
         self.next().await
     }
 
+    /// Send a message to the connected peer.
+    ///
+    /// Empty messages are ignored; non-empty messages are packaged as a `RaknetPacket::UserData`
+    /// and forwarded to the muxer's outbound channel for delivery.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on success, `RaknetError::ConnectionClosed` if the outbound channel is closed.
     pub async fn send(&self, msg: impl Into<super::Message>) -> Result<(), crate::RaknetError> {
         let msg = msg.into();
         let bytes = msg.buffer;
@@ -339,6 +436,30 @@ impl RaknetStream {
 }
 
 impl Drop for RaknetStream {
+    /// Cancels the associated cancellation token so background tasks tied to the stream are stopped when the stream is dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tokio_util::sync::CancellationToken;
+    ///
+    /// struct Dummy {
+    ///     cancel_token: CancellationToken,
+    /// }
+    ///
+    /// impl Drop for Dummy {
+    ///     fn drop(&mut self) {
+    ///         // mimic RaknetStream::drop behavior
+    ///         self.cancel_token.cancel();
+    ///     }
+    /// }
+    ///
+    /// // When `_d` goes out of scope, its `Drop` implementation cancels the token.
+    /// let token = CancellationToken::new();
+    /// {
+    ///     let _d = Dummy { cancel_token: token.clone() };
+    /// } // `_d` dropped here, token was cancelled
+    /// ```
     fn drop(&mut self) {
         self.cancel_token.cancel();
     }
@@ -373,6 +494,26 @@ struct ClientMuxerContext {
     cancel_token: CancellationToken,
 }
 
+/// Runs the background muxer loop that manages a client-side RakNet session over a UDP socket.
+///
+/// This task performs the client handshake, maintains a ManagedSession, receives and decodes
+/// incoming datagrams from the server, queues and flushes outbound datagrams, forwards
+/// application-level UserData packets to the provided application channel, signals readiness
+/// once the session is connected, responds to cancellation via the context's CancellationToken,
+/// and performs a graceful disconnect on shutdown.
+///
+/// - `socket`: bound UDP socket used to send and receive packets to/from the server.
+/// - `context`: ClientMuxerContext containing server address, session configuration, channels
+///   for outbound/app messages, a readiness oneshot sender, and a cancellation token.
+///
+/// # Examples
+///
+/// ```no_run
+/// use tokio::net::UdpSocket;
+/// use tokio::spawn;
+/// // Assume `ctx` is a prepared ClientMuxerContext and `sock` is a bound UdpSocket.
+/// // spawn(async move { run_client_muxer(sock, ctx).await });
+/// ```
 #[tracing::instrument(skip(socket, context), fields(server = %context.server, mtu = context.config.mtu), level = "debug")]
 async fn run_client_muxer(socket: UdpSocket, mut context: ClientMuxerContext) {
     let mut buf = vec![0u8; context.config.mtu as usize + UDP_HEADER_SIZE + 64];
@@ -838,6 +979,29 @@ async fn flush_built_datagrams(
     // Delivery of any unblocked packets happens via drain_ready_to_app() at call sites.
 }
 
+/// Signal readiness to the connector once the managed session is connected.
+///
+/// If `managed.is_connected()` is true and a `ready` sender is present, this
+/// function consumes the sender and sends `Ok(())` to notify the waiter; if the
+/// sender is absent or the session is not connected, nothing happens.
+///
+/// # Parameters
+///
+/// - `managed`: the session whose connection state is checked.
+/// - `ready`: an optional oneshot sender that will be taken and signaled when
+///   the session is connected.
+///
+/// # Examples
+///
+/// ```
+/// use tokio::sync::oneshot;
+/// // `managed` should be a `ManagedSession` that reports connected state.
+/// let managed = /* obtain a ManagedSession that is connected */;
+/// let (tx, rx) = oneshot::channel();
+/// let mut ready = Some(tx);
+/// notify_client_ready(&managed, &mut ready);
+/// // `rx` will receive `Ok(())` if `managed` was connected.
+/// ```
 #[tracing::instrument(skip(managed, ready), level = "trace")]
 fn notify_client_ready(
     managed: &ManagedSession,

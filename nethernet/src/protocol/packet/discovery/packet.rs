@@ -32,7 +32,35 @@ pub struct Header {
 }
 
 impl Header {
-    /// Reads and decodes the header from the reader.
+    /// Reads a discovery packet header from the provided reader.
+    ///
+    /// This reads a 16-bit little-endian packet ID, a 64-bit little-endian sender ID,
+    /// then consumes and discards 8 bytes of padding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error if the reader does not contain enough bytes or an underlying
+    /// read operation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io::Cursor;
+    ///
+    /// // Construct a buffer containing:
+    /// // - packet_id: 1 (u16 little-endian)
+    /// // - sender_id: 0x0102030405060708 (u64 little-endian)
+    /// // - 8 bytes of zero padding
+    /// let mut buf = Vec::new();
+    /// buf.extend(&1u16.to_le_bytes());
+    /// buf.extend(&0x0807060504030201u64.to_le_bytes());
+    /// buf.extend(&[0u8; 8]);
+    ///
+    /// let mut cur = Cursor::new(buf);
+    /// let hdr = Header::read(&mut cur).unwrap();
+    /// assert_eq!(hdr.packet_id, 1);
+    /// assert_eq!(hdr.sender_id, 0x0807060504030201u64);
+    /// ```
     pub fn read(r: &mut dyn Read) -> Result<Self> {
         let packet_id = U16LE::read(r)?.0;
         let sender_id = U64LE::read(r)?.0;
@@ -47,7 +75,32 @@ impl Header {
         })
     }
 
-    /// Writes the binary structure of the header into the writer.
+    /// Serialize the header into the provided writer using little-endian encoding and fixed padding.
+    ///
+    /// Writes the header fields in order:
+    /// 1. `packet_id` as a 16-bit little-endian integer.
+    /// 2. `sender_id` as a 64-bit little-endian integer.
+    /// 3. Eight zero bytes of padding.
+    ///
+    /// # Parameters
+    ///
+    /// - `w`: destination writer that receives the serialized header bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any underlying write to `w` fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let hdr = Header { packet_id: 0x1234, sender_id: 0x1122334455667788 };
+    /// let mut buf = Vec::new();
+    /// hdr.write(&mut buf).unwrap();
+    /// // 2 bytes (u16) + 8 bytes (u64) + 8 bytes padding = 18 bytes
+    /// assert_eq!(buf.len(), 18);
+    /// assert_eq!(&buf[0..2], &0x1234u16.to_le_bytes());
+    /// assert_eq!(&buf[2..10], &0x1122334455667788u64.to_le_bytes());
+    /// ```
     pub fn write(&self, w: &mut dyn Write) -> Result<()> {
         U16LE(self.packet_id).write(w)?;
         U64LE(self.sender_id).write(w)?;
@@ -57,16 +110,33 @@ impl Header {
     }
 }
 
-/// Marshals (encodes) a packet into bytes with the sender ID.
+/// Encodes a discovery packet together with a sender ID into the wire format.
 ///
-/// The packet structure is:
-/// - HMAC-SHA256 checksum (32 bytes)
-/// - AES-ECB encrypted payload:
-///   - Length (uint16)
-///   - Packet ID (uint16)
-///   - Sender ID (uint64)
-///   - Padding (8 bytes)
-///   - Packet data
+/// The output is: a 32-byte HMAC-SHA256 checksum followed by the AES-ECB encrypted payload.
+/// The encrypted payload contains a 16-bit length prefix, the packet header (packet ID and sender ID),
+/// 8 bytes of padding, and the packet-specific data.
+/// Returns an error if the encoded packet exceeds 65,535 bytes or if any underlying write/encryption step fails.
+///
+/// # Examples
+///
+/// ```
+/// struct Dummy;
+/// impl Packet for Dummy {
+///     fn id(&self) -> u16 { 0x02 }
+///     fn read(&mut self, _r: &mut dyn std::io::Read) -> Result<(), NethernetError> { Ok(()) }
+///     fn write(&self, _w: &mut dyn std::io::Write) -> Result<(), NethernetError> { Ok(()) }
+///     fn as_any(&self) -> &dyn std::any::Any { self }
+/// }
+///
+/// let packet = Dummy;
+/// let bytes = marshal(&packet, 0x1234_5678_90ab_cdef).expect("marshal failed");
+/// // Result must contain at least the 32-byte checksum
+/// assert!(bytes.len() >= 32);
+/// ```
+///
+/// # Returns
+///
+/// A Vec<u8> containing the serialized packet: the 32-byte HMAC-SHA256 checksum followed by the AES-ECB encrypted payload.
 pub fn marshal(packet: &dyn Packet, sender_id: u64) -> Result<Vec<u8>> {
     let mut buf = Vec::new();
 
@@ -104,7 +174,26 @@ pub fn marshal(packet: &dyn Packet, sender_id: u64) -> Result<Vec<u8>> {
     Ok(result)
 }
 
-/// Unmarshals (decodes) a packet from bytes and returns it with the sender ID.
+/// Decodes and verifies a discovery packet from raw bytes, returning the parsed packet and its sender ID.
+///
+/// The function expects the input to be a checksum (32 bytes) followed by an AES-ECB encrypted payload. It
+/// decrypts the payload, verifies the HMAC-SHA256 checksum against the plaintext, reads the payload length and
+/// header, instantiates the concrete packet type based on the header's packet ID, and delegates parsing of the
+/// packet-specific fields to that packet's `read` implementation. Errors are returned for malformed data,
+/// checksum mismatches, oversized/unknown packet IDs, or trailing bytes after parsing.
+///
+/// # Returns
+///
+/// A tuple containing the boxed concrete packet and the sender's 64-bit network ID.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// // Example demonstrates call site; real packets must be produced by `marshal`.
+/// let data: &[u8] = &[0u8; 32]; // too short / invalid — unmarshal should return an error
+/// let result = unmarshal(data);
+/// assert!(result.is_err());
+/// ```
 pub fn unmarshal(data: &[u8]) -> Result<(Box<dyn Packet>, u64)> {
     if data.len() < 32 {
         return Err(NethernetError::Other("packet too short".to_string()));
