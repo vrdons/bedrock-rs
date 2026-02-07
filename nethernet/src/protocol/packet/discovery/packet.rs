@@ -1,10 +1,10 @@
 //! Discovery packet trait and marshaling/unmarshaling utilities.
 
-use std::io::{self, Read, Write, Cursor};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use super::crypto::{compute_checksum, decrypt, encrypt, verify_checksum};
+use super::{MessagePacket, RequestPacket, ResponsePacket};
 use crate::error::{NethernetError, Result};
-use super::crypto::{encrypt, decrypt, compute_checksum, verify_checksum};
-use super::{RequestPacket, ResponsePacket, MessagePacket};
+use crate::protocol::types::{U16LE, U64LE};
+use std::io::{Cursor, Read, Write};
 
 /// Packet IDs for discovery packets.
 pub const ID_REQUEST_PACKET: u16 = 0x00;
@@ -15,13 +15,13 @@ pub const ID_MESSAGE_PACKET: u16 = 0x02;
 pub trait Packet: Send + Sync {
     /// Returns the unique ID of the packet.
     fn id(&self) -> u16;
-    
+
     /// Reads/decodes the packet data from the reader.
     fn read(&mut self, r: &mut dyn Read) -> Result<()>;
-    
+
     /// Writes the packet data into the writer.
     fn write(&self, w: &mut dyn Write) -> Result<()>;
-    
+
     /// Allows downcasting to concrete packet types.
     fn as_any(&self) -> &dyn std::any::Any;
 }
@@ -38,23 +38,23 @@ pub struct Header {
 impl Header {
     /// Reads and decodes the header from the reader.
     pub fn read(r: &mut dyn Read) -> Result<Self> {
-        let packet_id = r.read_u16::<LittleEndian>()?;
-        let sender_id = r.read_u64::<LittleEndian>()?;
-        
+        let packet_id = U16LE::read(r)?.0;
+        let sender_id = U64LE::read(r)?.0;
+
         // Discard 8-byte padding
         let mut padding = [0u8; 8];
         r.read_exact(&mut padding)?;
-        
+
         Ok(Self {
             packet_id,
             sender_id,
         })
     }
-    
+
     /// Writes the binary structure of the header into the writer.
     pub fn write(&self, w: &mut dyn Write) -> Result<()> {
-        w.write_u16::<LittleEndian>(self.packet_id)?;
-        w.write_u64::<LittleEndian>(self.sender_id)?;
+        U16LE(self.packet_id).write(w)?;
+        U64LE(self.sender_id).write(w)?;
         // 8-byte padding
         w.write_all(&[0u8; 8])?;
         Ok(())
@@ -73,34 +73,38 @@ impl Header {
 ///   - Packet data
 pub fn marshal(packet: &dyn Packet, sender_id: u64) -> Result<Vec<u8>> {
     let mut buf = Vec::new();
-    
+
     // Write header
     let header = Header {
         packet_id: packet.id(),
         sender_id,
     };
     header.write(&mut buf)?;
-    
+
     // Write packet data
     packet.write(&mut buf)?;
-    
+
     // Prepend length
+    // Validate that buf.len() fits in u16 to prevent silent truncation
+    if buf.len() > u16::MAX as usize {
+        return Err(NethernetError::MessageTooLarge(buf.len()));
+    }
     let length = buf.len() as u16;
     let mut payload = Vec::new();
-    payload.write_u16::<LittleEndian>(length)?;
+    U16LE(length).write(&mut payload)?;
     payload.extend_from_slice(&buf);
-    
+
     // Encrypt the payload
     let encrypted = encrypt(&payload)?;
-    
+
     // Compute HMAC-SHA256 checksum
     let checksum = compute_checksum(&payload);
-    
+
     // Combine checksum + encrypted data
     let mut result = Vec::new();
     result.extend_from_slice(&checksum);
     result.extend_from_slice(&encrypted);
-    
+
     Ok(result)
 }
 
@@ -109,98 +113,63 @@ pub fn unmarshal(data: &[u8]) -> Result<(Box<dyn Packet>, u64)> {
     if data.len() < 32 {
         return Err(NethernetError::Other("packet too short".to_string()));
     }
-    
+
     // Extract checksum and encrypted payload
     let checksum: [u8; 32] = data[..32].try_into().unwrap();
     let encrypted = &data[32..];
-    
+
     // Decrypt the payload
     let payload = decrypt(encrypted)?;
-    
+
     // Verify checksum
     if !verify_checksum(&payload, &checksum) {
         return Err(NethernetError::Other("checksum mismatch".to_string()));
     }
-    
+
     let mut cursor = Cursor::new(payload);
-    
-    // Read length
-    let _length = cursor.read_u16::<LittleEndian>()?;
-    
+
+    // Read length (2 bytes) - this was missing!
+    let _length = U16LE::read(&mut cursor)?;
+
     // Read header
     let header = Header::read(&mut cursor)?;
-    
+
     // Create appropriate packet based on ID
     let mut packet: Box<dyn Packet> = match header.packet_id {
         ID_REQUEST_PACKET => Box::new(RequestPacket::default()),
         ID_RESPONSE_PACKET => Box::new(ResponsePacket::default()),
         ID_MESSAGE_PACKET => Box::new(MessagePacket::default()),
-        _ => return Err(NethernetError::Other(format!("unknown packet ID: {}", header.packet_id))),
+        _ => {
+            return Err(NethernetError::Other(format!(
+                "unknown packet ID: {}",
+                header.packet_id
+            )));
+        }
     };
-    
+
     // Read packet data
     packet.read(&mut cursor)?;
-    
+
     Ok((packet, header.sender_id))
-}
-
-/// Reads a length-prefixed byte array from the reader.
-pub fn read_bytes<L: Into<u64>>(r: &mut dyn Read, read_length: impl Fn(&mut dyn Read) -> io::Result<L>) -> Result<Vec<u8>> {
-    let length: u64 = read_length(r)?.into();
-    let mut buf = vec![0u8; length as usize];
-    r.read_exact(&mut buf)?;
-    Ok(buf)
-}
-
-/// Reads a u8-prefixed byte array.
-pub fn read_bytes_u8(r: &mut dyn Read) -> Result<Vec<u8>> {
-    read_bytes(r, |r| r.read_u8())
-}
-
-/// Reads a u32-prefixed byte array.
-pub fn read_bytes_u32(r: &mut dyn Read) -> Result<Vec<u8>> {
-    read_bytes(r, |r| r.read_u32::<LittleEndian>())
-}
-
-/// Writes a length-prefixed byte array to the writer.
-pub fn write_bytes<L: TryFrom<usize>>(w: &mut dyn Write, data: &[u8], write_length: impl Fn(&mut dyn Write, L) -> io::Result<()>) -> Result<()> 
-where
-    <L as TryFrom<usize>>::Error: std::fmt::Debug,
-{
-    let length = L::try_from(data.len())
-        .map_err(|e| NethernetError::Other(format!("length conversion failed: {:?}", e)))?;
-    write_length(w, length)?;
-    w.write_all(data)?;
-    Ok(())
-}
-
-/// Writes a u8-prefixed byte array.
-pub fn write_bytes_u8(w: &mut dyn Write, data: &[u8]) -> Result<()> {
-    write_bytes(w, data, |w, len: u8| w.write_u8(len))
-}
-
-/// Writes a u32-prefixed byte array.
-pub fn write_bytes_u32(w: &mut dyn Write, data: &[u8]) -> Result<()> {
-    write_bytes(w, data, |w, len: u32| w.write_u32::<LittleEndian>(len))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_header_roundtrip() {
         let header = Header {
             packet_id: 0x01,
             sender_id: 0x1234567890abcdef,
         };
-        
+
         let mut buf = Vec::new();
         header.write(&mut buf).unwrap();
-        
+
         let mut cursor = Cursor::new(buf);
         let decoded = Header::read(&mut cursor).unwrap();
-        
+
         assert_eq!(header.packet_id, decoded.packet_id);
         assert_eq!(header.sender_id, decoded.sender_id);
     }

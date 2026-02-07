@@ -1,9 +1,3 @@
-//! Packet handling and segmentation.
+//! Packet handling.
 
-mod segmentation;
-
-pub use segmentation::{
-    SegmentedMessage,
-    SegmentAssembler,
-    segment_packet,
-};
+pub mod discovery;

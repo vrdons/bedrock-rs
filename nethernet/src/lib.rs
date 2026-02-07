@@ -17,17 +17,15 @@
 //! - Xbox Live signaling via WebSocket
 //! - Signal protocol compatible with Go implementation
 
-pub mod discovery;
 pub mod error;
 pub mod protocol;
-pub mod signaling;
 pub mod session;
+pub mod signaling;
 pub mod transport;
 
-pub use discovery::{ServerData, RequestPacket, ResponsePacket, MessagePacket};
 pub use error::{NethernetError, Result};
-pub use protocol::{Signal, SignalType, Message, ConnectError, NegotiationMessage};
-pub use protocol::{SegmentedMessage, SegmentAssembler, segment_packet};
-pub use session::{Session};
-pub use signaling::{Signaling, Notifier};
+pub use protocol::packet::discovery::{MessagePacket, RequestPacket, ResponsePacket, ServerData};
+pub use protocol::{ConnectError, Message, MessageSegment, NegotiationMessage, Signal, SignalType};
+pub use session::Session;
+pub use signaling::{Notifier, Signaling};
 pub use transport::{NethernetListener, NethernetStream};

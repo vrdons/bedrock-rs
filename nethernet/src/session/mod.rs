@@ -1,9 +1,9 @@
 use crate::error::{NethernetError, Result};
-use crate::protocol::{Message, MessageSegment};
 use crate::protocol::constants::DEFAULT_PACKET_CHANNEL_CAPACITY;
+use crate::protocol::{Message, MessageSegment};
 use bytes::Bytes;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock, Mutex};
+use tokio::sync::{Mutex, RwLock, mpsc};
 use tracing;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
@@ -21,17 +21,12 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(
-        peer_connection: Arc<RTCPeerConnection>,
-    ) -> Self {
+    pub fn new(peer_connection: Arc<RTCPeerConnection>) -> Self {
         Self::with_capacity(peer_connection, DEFAULT_PACKET_CHANNEL_CAPACITY)
     }
 
     /// Creates a new session with a custom packet channel capacity
-    pub fn with_capacity(
-        peer_connection: Arc<RTCPeerConnection>,
-        capacity: usize,
-    ) -> Self {
+    pub fn with_capacity(peer_connection: Arc<RTCPeerConnection>, capacity: usize) -> Self {
         let (packet_tx, packet_rx) = mpsc::channel(capacity);
 
         Self {
@@ -51,7 +46,7 @@ impl Session {
         let packet_tx = self.packet_tx.clone();
 
         channel.on_message(Box::new(move |msg| {
-            let data = Bytes::from(msg.data.to_vec());
+            let data = msg.data.clone();
             let buffer = message_buffer.clone();
             let tx = packet_tx.clone();
 
@@ -59,8 +54,11 @@ impl Session {
                 let data_len = data.len();
                 match MessageSegment::decode(data.clone()) {
                     Ok(segment) => {
-                        let mut buf = buffer.lock().await;
-                        match buf.add_segment(segment) {
+                        let result = {
+                            let mut buf = buffer.lock().await;
+                            buf.add_segment(segment)
+                        };
+                        match result {
                             Ok(Some(complete_msg)) => {
                                 // Use async send to handle backpressure with bounded channel
                                 // If send fails, it means the receiver has been dropped
@@ -104,15 +102,18 @@ impl Session {
 
         let channel = {
             let guard = self.reliable_channel.lock().await;
-            guard.as_ref()
+            guard
+                .as_ref()
                 .ok_or_else(|| NethernetError::DataChannel("Reliable channel not set".to_string()))?
                 .clone()
         };
 
-        let segments = Message::split_into_segments(data);
+        let segments = Message::split_into_segments(data)?;
         for segment in segments {
             let encoded = segment.encode();
-            channel.send(&encoded.into()).await
+            channel
+                .send(&encoded)
+                .await
                 .map_err(|e| NethernetError::DataChannel(e.to_string()))?;
         }
 
@@ -137,15 +138,21 @@ impl Session {
 
         *self.closed.write().await = true;
 
-        if let Some(channel) = self.reliable_channel.lock().await.as_ref() {
-            let _ = channel.close().await;
-        }
-        if let Some(channel) = self.unreliable_channel.lock().await.as_ref() {
+        // Acquire lock, clone the channel, drop the lock, then close
+        let reliable = self.reliable_channel.lock().await.clone();
+        if let Some(channel) = reliable {
             let _ = channel.close().await;
         }
 
-        self.peer_connection.close().await
-            .map_err(|e| NethernetError::WebRtc(e))?;
+        let unreliable = self.unreliable_channel.lock().await.clone();
+        if let Some(channel) = unreliable {
+            let _ = channel.close().await;
+        }
+
+        self.peer_connection
+            .close()
+            .await
+            .map_err(NethernetError::WebRtc)?;
 
         Ok(())
     }

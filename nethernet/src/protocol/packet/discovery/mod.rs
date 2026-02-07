@@ -12,17 +12,17 @@
 //! All packets are encrypted with AES-ECB and authenticated with HMAC-SHA256.
 
 mod crypto;
+mod message;
 mod packet;
 mod request;
 mod response;
-mod message;
 mod server_data;
 
-pub use packet::{Packet, Header, marshal, unmarshal};
-pub use packet::{ID_REQUEST_PACKET, ID_RESPONSE_PACKET, ID_MESSAGE_PACKET};
+pub use message::MessagePacket;
+pub use packet::{Header, Packet, marshal, unmarshal};
+pub use packet::{ID_MESSAGE_PACKET, ID_REQUEST_PACKET, ID_RESPONSE_PACKET};
 pub use request::RequestPacket;
 pub use response::ResponsePacket;
-pub use message::MessagePacket;
 pub use server_data::ServerData;
 
 /// Default LAN discovery port

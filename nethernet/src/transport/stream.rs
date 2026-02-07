@@ -1,23 +1,31 @@
 use crate::error::{NethernetError, Result};
-use crate::protocol::{Signal, SignalType, constants::{RELIABLE_CHANNEL, UNRELIABLE_CHANNEL}};
-use crate::session::{Session};
+use crate::protocol::{
+    Signal, SignalType,
+    constants::{RELIABLE_CHANNEL, UNRELIABLE_CHANNEL},
+};
+use crate::session::Session;
 use crate::signaling::Signaling;
 use bytes::Bytes;
-use futures::{Stream, StreamExt, Future};
+use futures::{Future, Stream, StreamExt};
+use rand::RngCore;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use tokio_util::sync::CancellationToken;
 use webrtc::api::APIBuilder;
 use webrtc::api::media_engine::MediaEngine;
+use webrtc::api::setting_engine::SettingEngine;
 use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
 use webrtc::peer_connection::configuration::RTCConfiguration;
+
+type PendingRecv = Pin<Box<dyn Future<Output = Result<Option<Bytes>>> + Send>>;
 
 /// NetherNet stream - data transmission over WebRTC
 pub struct NethernetStream {
     session: Arc<Session>,
     remote_addr: SocketAddr,
-    pending_recv: Option<Pin<Box<dyn Future<Output = Result<Option<Bytes>>> + Send>>>,
+    pending_recv: Option<PendingRecv>,
 }
 
 impl NethernetStream {
@@ -27,12 +35,24 @@ impl NethernetStream {
         remote_network_id: String,
         remote_addr: SocketAddr,
     ) -> Result<Self> {
-        // Create WebRTC API
+        // Create WebRTC API with custom settings
         let media_engine = MediaEngine::default();
-        let api = APIBuilder::new().with_media_engine(media_engine).build();
+        
+        // Configure SettingEngine to avoid IPv6 link-local binding issues
+        let mut setting_engine = SettingEngine::default();
+        // Disable IPv6 to avoid link-local binding errors on Linux
+        setting_engine.set_ip_filter(Box::new(|ip| !ip.is_ipv6()));
+        
+        let api = APIBuilder::new()
+            .with_media_engine(media_engine)
+            .with_setting_engine(setting_engine)
+            .build();
 
-        // Create peer connection
-        let config = RTCConfiguration::default();
+        // Create peer connection with mDNS candidates for LAN
+        let config = RTCConfiguration {
+            ice_servers: vec![],
+            ..Default::default()
+        };
 
         let peer_connection = Arc::new(api.new_peer_connection(config).await?);
 
@@ -59,16 +79,18 @@ impl NethernetStream {
             .await?;
 
         // Generate connection ID
-        let connection_id = rand::random::<u64>();
-        
+        let mut connection_id_bytes = [0u8; 8];
+        rand::rng().fill_bytes(&mut connection_id_bytes);
+        let connection_id = u64::from_ne_bytes(connection_id_bytes);
+
         // Create channels to wait for DataChannel open events
         let (reliable_open_tx, reliable_open_rx) = tokio::sync::oneshot::channel::<()>();
         let (unreliable_open_tx, unreliable_open_rx) = tokio::sync::oneshot::channel::<()>();
-        
+
         // Set up on_open handlers for DataChannels
         let reliable_open_tx = Arc::new(tokio::sync::Mutex::new(Some(reliable_open_tx)));
         let unreliable_open_tx = Arc::new(tokio::sync::Mutex::new(Some(unreliable_open_tx)));
-        
+
         let reliable_tx_clone = reliable_open_tx.clone();
         reliable_channel.on_open(Box::new(move || {
             let tx = reliable_tx_clone.clone();
@@ -78,7 +100,7 @@ impl NethernetStream {
                 }
             })
         }));
-        
+
         let unreliable_tx_clone = unreliable_open_tx.clone();
         unreliable_channel.on_open(Box::new(move || {
             let tx = unreliable_tx_clone.clone();
@@ -92,33 +114,31 @@ impl NethernetStream {
         // Set up ICE candidate handler to signal candidates
         let signaling_clone = signaling.clone();
         let remote_network_id_clone = remote_network_id.clone();
-        peer_connection.on_ice_candidate(Box::new(move |candidate: Option<webrtc::ice_transport::ice_candidate::RTCIceCandidate>| {
-            let signaling = signaling_clone.clone();
-            let network_id = remote_network_id_clone.clone();
-            Box::pin(async move {
-                if let Some(candidate) = candidate {
-                    if let Ok(json) = candidate.to_json() {
-                        let candidate_signal = Signal::candidate(
-                            connection_id,
-                            json.candidate,
-                            network_id,
-                        );
-                        let _ = signaling.signal(candidate_signal).await;
+        peer_connection.on_ice_candidate(Box::new(
+            move |candidate: Option<webrtc::ice_transport::ice_candidate::RTCIceCandidate>| {
+                let signaling = signaling_clone.clone();
+                let network_id = remote_network_id_clone.clone();
+                Box::pin(async move {
+                    if let Some(candidate) = candidate {
+                        if let Ok(json) = candidate.to_json() {
+                            // Serialize full RTCIceCandidateInit (includes candidate, sdp_mid, sdp_mline_index)
+                            if let Ok(candidate_json) = serde_json::to_string(&json) {
+                                let candidate_signal =
+                                    Signal::candidate(connection_id, candidate_json, network_id);
+                                let _ = signaling.signal(candidate_signal).await;
+                            }
+                        }
                     }
-                }
-            })
-        }));
+                })
+            },
+        ));
 
         // Create offer
         let offer = peer_connection.create_offer(None).await?;
         peer_connection.set_local_description(offer.clone()).await?;
 
         // Signal the offer
-        let offer_signal = Signal::offer(
-            connection_id,
-            offer.sdp,
-            remote_network_id.clone(),
-        );
+        let offer_signal = Signal::offer(connection_id, offer.sdp, remote_network_id.clone());
         signaling.signal(offer_signal).await?;
 
         // Wait for answer and handle candidates
@@ -131,12 +151,13 @@ impl NethernetStream {
                             break signal.data;
                         }
                         SignalType::Candidate => {
-                            // Add remote ICE candidate
-                            let candidate = webrtc::ice_transport::ice_candidate::RTCIceCandidateInit {
-                                candidate: signal.data,
-                                ..Default::default()
-                            };
-                            let _ = peer_connection.add_ice_candidate(candidate).await;
+                            // Add remote ICE candidate - deserialize full RTCIceCandidateInit
+                            if let Ok(candidate_init) = serde_json::from_str::<
+                                webrtc::ice_transport::ice_candidate::RTCIceCandidateInit,
+                            >(&signal.data)
+                            {
+                                let _ = peer_connection.add_ice_candidate(candidate_init).await;
+                            }
                         }
                         _ => {}
                     }
@@ -147,46 +168,63 @@ impl NethernetStream {
         };
 
         // Set the answer
-        let answer_desc = webrtc::peer_connection::sdp::session_description::RTCSessionDescription::answer(answer)?;
+        let answer_desc =
+            webrtc::peer_connection::sdp::session_description::RTCSessionDescription::answer(
+                answer,
+            )?;
         peer_connection.set_remote_description(answer_desc).await?;
-        
-        // Continue processing candidates
+
+        // Continue processing candidates with cancellation support
         let peer_connection_clone = peer_connection.clone();
+        let cancel_token = CancellationToken::new();
+        let cancel_token_clone = cancel_token.clone();
         tokio::spawn(async move {
-            while let Some(signal) = signals.next().await {
-                if signal.connection_id == connection_id && signal.signal_type == SignalType::Candidate {
-                    let candidate = webrtc::ice_transport::ice_candidate::RTCIceCandidateInit {
-                        candidate: signal.data,
-                        ..Default::default()
-                    };
-                    let _ = peer_connection_clone.add_ice_candidate(candidate).await;
+            loop {
+                tokio::select! {
+                    _ = cancel_token_clone.cancelled() => {
+                        // Task cancelled, exit loop
+                        break;
+                    }
+                    signal_opt = signals.next() => {
+                        if let Some(signal) = signal_opt {
+                            if signal.connection_id == connection_id
+                                && signal.signal_type == SignalType::Candidate
+                            {
+                                // Add remote ICE candidate - deserialize full RTCIceCandidateInit
+                                if let Ok(candidate_init) = serde_json::from_str::<
+                                    webrtc::ice_transport::ice_candidate::RTCIceCandidateInit,
+                                >(&signal.data)
+                                {
+                                    let _ = peer_connection_clone
+                                        .add_ice_candidate(candidate_init)
+                                        .await;
+                                }
+                            }
+                        } else {
+                            // Signal stream ended, exit loop
+                            break;
+                        }
+                    }
                 }
             }
         });
 
         let session = Arc::new(Session::new(peer_connection.clone()));
-        
+
         // Set up data channels
         session.set_reliable_channel(reliable_channel).await?;
         session.set_unreliable_channel(unreliable_channel).await?;
-        
+
         // Wait for both DataChannels to open (with timeout)
         let timeout_duration = std::time::Duration::from_secs(10);
-        
-        tokio::select! {
-            _ = reliable_open_rx => {}
-            _ = tokio::time::sleep(timeout_duration) => {
-                return Err(NethernetError::Timeout);
-            }
-        }
-        
-        tokio::select! {
-            _ = unreliable_open_rx => {}
-            _ = tokio::time::sleep(timeout_duration) => {
-                return Err(NethernetError::Timeout);
-            }
-        }
-        
+
+        // Wait for both channels concurrently within the same timeout window
+        tokio::time::timeout(timeout_duration, async {
+            let _ = tokio::join!(reliable_open_rx, unreliable_open_rx);
+        })
+        .await
+        .map_err(|_| NethernetError::Timeout)?;
+
         // Wait for ICE connection to establish
         let peer_conn_clone = peer_connection.clone();
         let ice_connected = tokio::time::timeout(timeout_duration, async move {
@@ -208,13 +246,20 @@ impl NethernetStream {
                 }
             }
         }).await;
-        
+
         match ice_connected {
-            Ok(Ok(())) => {}
+            Ok(Ok(())) => {
+                // ICE connection established, cancel the candidate processing task
+                cancel_token.cancel();
+            }
             Ok(Err(e)) => {
+                cancel_token.cancel();
                 return Err(e);
             }
-            Err(_) => {}
+            Err(_) => {
+                cancel_token.cancel();
+                return Err(NethernetError::Timeout);
+            }
         }
 
         Ok(Self {
@@ -266,9 +311,7 @@ impl Stream for NethernetStream {
         // If no pending future exists, create one
         if self.pending_recv.is_none() {
             let session = self.session.clone();
-            let fut = Box::pin(async move {
-                session.recv().await
-            });
+            let fut = Box::pin(async move { session.recv().await });
             self.pending_recv = Some(fut);
         }
 

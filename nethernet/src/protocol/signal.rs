@@ -60,7 +60,12 @@ pub struct Signal {
 }
 
 impl Signal {
-    pub fn new(signal_type: SignalType, connection_id: u64, data: String, network_id: String) -> Self {
+    pub fn new(
+        signal_type: SignalType,
+        connection_id: u64,
+        data: String,
+        network_id: String,
+    ) -> Self {
         Self {
             signal_type,
             connection_id,
@@ -94,16 +99,6 @@ impl Signal {
         )
     }
 
-    /// Converts the signal to string format: "TYPE CONNECTION_ID DATA"
-    pub fn to_string(&self) -> String {
-        format!(
-            "{} {} {}",
-            self.signal_type.as_str(),
-            self.connection_id,
-            self.data
-        )
-    }
-
     /// Parses a signal from string
     pub fn from_string(s: &str, network_id: String) -> Result<Self, NethernetError> {
         let parts: Vec<&str> = s.splitn(3, ' ').collect();
@@ -115,9 +110,9 @@ impl Signal {
         }
 
         let signal_type = SignalType::from_str(parts[0])?;
-        let connection_id = parts[1].parse::<u64>().map_err(|e| {
-            NethernetError::Other(format!("Failed to parse connection ID: {}", e))
-        })?;
+        let connection_id = parts[1]
+            .parse::<u64>()
+            .map_err(|e| NethernetError::Other(format!("Failed to parse connection ID: {}", e)))?;
         let data = parts[2].to_string();
 
         Ok(Self {
@@ -131,6 +126,12 @@ impl Signal {
 
 impl fmt::Display for Signal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_string())
+        write!(
+            f,
+            "{} {} {}",
+            self.signal_type.as_str(),
+            self.connection_id,
+            self.data
+        )
     }
 }

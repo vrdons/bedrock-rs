@@ -3,8 +3,9 @@
 //! These messages are sent during WebRTC connection establishment.
 //! Format: `MESSAGETYPE CONNECTIONID DATA`
 
-use crate::error::{NethernetError, Result};
 use super::error::ConnectError;
+use crate::error::{NethernetError, Result};
+use std::fmt;
 
 /// Message types used for WebRTC negotiation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,79 +43,72 @@ impl NegotiationMessage {
         }
 
         let message_type = parts[0];
-        let connection_id = parts[1].parse::<u64>()
+        let connection_id = parts[1]
+            .parse::<u64>()
             .map_err(|e| NethernetError::Other(format!("invalid connection ID: {}", e)))?;
+
+        // Helper closure for validating payload (parts[2])
+        let validate_payload = |error_msg: &str| -> Result<&str> {
+            if parts.len() < 3 {
+                return Err(NethernetError::Other(error_msg.to_string()));
+            }
+            if parts[2].trim().is_empty() {
+                return Err(NethernetError::Other(error_msg.to_string()));
+            }
+            Ok(parts[2])
+        };
 
         match message_type {
             "CONNECTREQUEST" => {
-                if parts.len() < 3 {
-                    return Err(NethernetError::Other("missing SDP offer".to_string()));
-                }
+                let sdp_offer = validate_payload("missing SDP offer")?;
                 Ok(Self::ConnectRequest {
                     connection_id,
-                    sdp_offer: parts[2].to_string(),
+                    sdp_offer: sdp_offer.to_string(),
                 })
             }
             "CONNECTRESPONSE" => {
-                if parts.len() < 3 {
-                    return Err(NethernetError::Other("missing SDP answer".to_string()));
-                }
+                let sdp_answer = validate_payload("missing SDP answer")?;
                 Ok(Self::ConnectResponse {
                     connection_id,
-                    sdp_answer: parts[2].to_string(),
+                    sdp_answer: sdp_answer.to_string(),
                 })
             }
             "CANDIDATEADD" => {
-                if parts.len() < 3 {
-                    return Err(NethernetError::Other("missing ICE candidate".to_string()));
-                }
+                let candidate = validate_payload("missing ICE candidate")?;
                 Ok(Self::CandidateAdd {
                     connection_id,
-                    candidate: parts[2].to_string(),
+                    candidate: candidate.to_string(),
                 })
             }
             "CONNECTERROR" => {
                 if parts.len() < 3 {
                     return Err(NethernetError::Other("missing error code".to_string()));
                 }
-                let error_code = parts[2].parse::<u8>()
+                let error_code = parts[2]
+                    .parse::<u8>()
                     .map_err(|e| NethernetError::Other(format!("invalid error code: {}", e)))?;
-                let error = ConnectError::from_code(error_code)
-                    .ok_or_else(|| NethernetError::Other(format!("unknown error code: {}", error_code)))?;
+                let error = ConnectError::from_code(error_code).ok_or_else(|| {
+                    NethernetError::Other(format!("unknown error code: {}", error_code))
+                })?;
                 Ok(Self::ConnectError {
                     connection_id,
                     error,
                 })
             }
-            _ => Err(NethernetError::Other(format!("unknown message type: {}", message_type))),
-        }
-    }
-
-    /// Converts the message to string format.
-    pub fn to_string(&self) -> String {
-        match self {
-            Self::ConnectRequest { connection_id, sdp_offer } => {
-                format!("CONNECTREQUEST {} {}", connection_id, sdp_offer)
-            }
-            Self::ConnectResponse { connection_id, sdp_answer } => {
-                format!("CONNECTRESPONSE {} {}", connection_id, sdp_answer)
-            }
-            Self::CandidateAdd { connection_id, candidate } => {
-                format!("CANDIDATEADD {} {}", connection_id, candidate)
-            }
-            Self::ConnectError { connection_id, error } => {
-                format!("CONNECTERROR {} {}", connection_id, error.code())
-            }
+            _ => Err(NethernetError::Other(format!(
+                "unknown message type: {}",
+                message_type
+            ))),
         }
     }
 
     /// Returns the connection ID of the message.
     pub fn connection_id(&self) -> u64 {
         match self {
-            Self::ConnectRequest { connection_id, .. } |
-            Self::ConnectResponse { connection_id, .. } |
-            Self::CandidateAdd { connection_id, .. } |
-            Self::ConnectError { connection_id, .. } => *connection_id,
+            Self::ConnectRequest { connection_id, .. }
+            | Self::ConnectResponse { connection_id, .. }
+            | Self::CandidateAdd { connection_id, .. }
+            | Self::ConnectError { connection_id, .. } => *connection_id,
         }
     }
 
@@ -125,6 +119,37 @@ impl NegotiationMessage {
             Self::ConnectResponse { .. } => "CONNECTRESPONSE",
             Self::CandidateAdd { .. } => "CANDIDATEADD",
             Self::ConnectError { .. } => "CONNECTERROR",
+        }
+    }
+}
+
+impl fmt::Display for NegotiationMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ConnectRequest {
+                connection_id,
+                sdp_offer,
+            } => {
+                write!(f, "CONNECTREQUEST {} {}", connection_id, sdp_offer)
+            }
+            Self::ConnectResponse {
+                connection_id,
+                sdp_answer,
+            } => {
+                write!(f, "CONNECTRESPONSE {} {}", connection_id, sdp_answer)
+            }
+            Self::CandidateAdd {
+                connection_id,
+                candidate,
+            } => {
+                write!(f, "CANDIDATEADD {} {}", connection_id, candidate)
+            }
+            Self::ConnectError {
+                connection_id,
+                error,
+            } => {
+                write!(f, "CONNECTERROR {} {}", connection_id, error.code())
+            }
         }
     }
 }
@@ -159,7 +184,8 @@ mod tests {
     fn test_candidate_add_roundtrip() {
         let msg = NegotiationMessage::CandidateAdd {
             connection_id: 11111,
-            candidate: "candidate:1234567890 1 udp 2130706431 192.168.1.100 54321 typ host".to_string(),
+            candidate: "candidate:1234567890 1 udp 2130706431 192.168.1.100 54321 typ host"
+                .to_string(),
         };
         let s = msg.to_string();
         let parsed = NegotiationMessage::parse(&s).unwrap();

@@ -3,83 +3,95 @@
 //! Discovery packets are encrypted using AES-ECB with PKCS7 padding,
 //! and authenticated with HMAC-SHA256 checksums.
 
-use aes::Aes256;
-use cipher::{BlockEncrypt, BlockDecrypt, KeyInit, Block};
-use hmac::{Hmac, Mac};
-use sha2::{Sha256, Digest};
 use crate::error::{NethernetError, Result};
+use aes::Aes256;
+use aes::cipher::{Block, BlockDecrypt, BlockEncrypt, KeyInit};
+use hmac::{Hmac, Mac};
+use sha2::{Digest, Sha256};
+use std::sync::LazyLock;
 
 /// The encryption key used for packets transmitted during LAN discovery.
 /// This is the SHA-256 hash of 0xdeadbeef (also referenced as Application ID).
-pub(crate) fn encryption_key() -> [u8; 32] {
+/// Computed once and cached for all subsequent calls.
+static ENCRYPTION_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
     let mut hasher = Sha256::new();
-    hasher.update(&0xdeadbeef_u64.to_le_bytes());
+    hasher.update(0xdeadbeef_u64.to_le_bytes());
     let result = hasher.finalize();
     let mut key = [0u8; 32];
     key.copy_from_slice(&result);
     key
+});
+
+/// Returns a static reference to the encryption key.
+pub(crate) fn encryption_key() -> &'static [u8; 32] {
+    &ENCRYPTION_KEY
 }
 
 /// Encrypts the content of the bytes using AES-ECB with PKCS7 padding.
 pub(crate) fn encrypt(data: &[u8]) -> Result<Vec<u8>> {
     let key = encryption_key();
-    let cipher = Aes256::new(&key.into());
-    
+    let cipher = Aes256::new(key.into());
+
     // Apply PKCS7 padding
     let block_size = 16;
     let padding_len = block_size - (data.len() % block_size);
     let mut padded = data.to_vec();
     padded.extend(vec![padding_len as u8; padding_len]);
-    
+
     // Encrypt each block
-    let mut encrypted = padded.clone();
-    for chunk in encrypted.chunks_exact_mut(block_size) {
+    for chunk in padded.chunks_exact_mut(block_size) {
         let block = Block::<Aes256>::from_mut_slice(chunk);
         cipher.encrypt_block(block);
     }
-    
-    Ok(encrypted)
+
+    Ok(padded)
 }
 
 /// Decrypts the content of the bytes using AES-ECB with PKCS7 padding.
 pub(crate) fn decrypt(data: &[u8]) -> Result<Vec<u8>> {
     let key = encryption_key();
-    let cipher = Aes256::new(&key.into());
-    
+    let cipher = Aes256::new(key.into());
+
     if data.len() % 16 != 0 {
-        return Err(NethernetError::Other("Invalid encrypted data length".to_string()));
+        return Err(NethernetError::Other(
+            "Invalid encrypted data length".to_string(),
+        ));
     }
-    
+
     // Decrypt each block
     let mut decrypted = data.to_vec();
     for chunk in decrypted.chunks_exact_mut(16) {
         let block = Block::<Aes256>::from_mut_slice(chunk);
         cipher.decrypt_block(block);
     }
-    
+
     // Remove PKCS7 padding
     if let Some(&padding_len) = decrypted.last() {
         if padding_len > 0 && padding_len <= 16 {
             let data_len = decrypted.len();
             if data_len >= padding_len as usize {
-                // Verify padding
+                // Verify padding (constant-time)
                 let padding_start = data_len - padding_len as usize;
-                if decrypted[padding_start..].iter().all(|&b| b == padding_len) {
+                let mut mismatched: u8 = 0;
+                for &byte in &decrypted[padding_start..] {
+                    mismatched |= byte ^ padding_len;
+                }
+                if mismatched == 0 {
                     decrypted.truncate(padding_start);
                     return Ok(decrypted);
                 }
             }
         }
     }
-    
+
     Err(NethernetError::Other("Invalid padding".to_string()))
 }
 
 /// Computes the HMAC-SHA256 checksum for the given data.
 pub(crate) fn compute_checksum(data: &[u8]) -> [u8; 32] {
     let key = encryption_key();
-    let mut mac = <Hmac::<Sha256> as Mac>::new_from_slice(&key)
-        .expect("HMAC can take key of any size");
+    let mut mac =
+        <Hmac<Sha256> as Mac>::new_from_slice(key).expect("HMAC can take key of any size");
     mac.update(data);
     let result = mac.finalize();
     let mut checksum = [0u8; 32];
@@ -90,8 +102,8 @@ pub(crate) fn compute_checksum(data: &[u8]) -> [u8; 32] {
 /// Verifies the HMAC-SHA256 checksum for the given data.
 pub(crate) fn verify_checksum(data: &[u8], expected: &[u8; 32]) -> bool {
     let key = encryption_key();
-    let mut mac = <Hmac::<Sha256> as Mac>::new_from_slice(&key)
-        .expect("HMAC can take key of any size");
+    let mut mac =
+        <Hmac<Sha256> as Mac>::new_from_slice(key).expect("HMAC can take key of any size");
     mac.update(data);
     mac.verify_slice(expected).is_ok()
 }
@@ -113,7 +125,7 @@ mod tests {
         let data = b"Test data for checksum";
         let checksum = compute_checksum(data);
         assert!(verify_checksum(data, &checksum));
-        
+
         let wrong_checksum = [0u8; 32];
         assert!(!verify_checksum(data, &wrong_checksum));
     }

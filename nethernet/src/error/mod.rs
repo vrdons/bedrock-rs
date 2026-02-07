@@ -40,6 +40,10 @@ pub enum NethernetError {
     #[error("Message parse error: {0}")]
     MessageParse(String),
 
+    /// Message too large error
+    #[error("Message too large: exceeds maximum size of {0} bytes")]
+    MessageTooLarge(usize),
+
     /// Timeout error
     #[error("Operation timed out")]
     Timeout,

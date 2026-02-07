@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing with environment filter
     let fmt_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stdout);
 
-    let filter_layer = filter::LevelFilter::from_level(Level::DEBUG);
+    let filter_layer = filter::LevelFilter::from_level(Level::TRACE);
 
     tracing_subscriber::registry()
         .with(fmt_layer)

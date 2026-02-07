@@ -3,10 +3,9 @@
 //! Encapsulated in ResponsePacket.ApplicationData and sent in response
 //! to RequestPacket broadcasted by clients on port 7551.
 
-use std::io::Cursor;
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::error::{NethernetError, Result};
-use super::packet::{read_bytes_u8, write_bytes_u8};
+use crate::protocol::types::{read_bytes_u8, read_i32_le, read_u8, write_bytes_u8, write_u8};
+use std::io::Cursor;
 
 /// Current version of ServerData supported by the discovery module.
 const VERSION: u8 = 4;
@@ -52,78 +51,99 @@ impl ServerData {
 
     /// Encodes ServerData to binary format.
     pub fn marshal(&self) -> Result<Vec<u8>> {
+        // Validate fields that will be shifted to prevent overflow
+        if self.game_type >= 128 {
+            return Err(NethernetError::Other(format!(
+                "game_type must be less than 128 to avoid overflow, got {}",
+                self.game_type
+            )));
+        }
+        if self.transport_layer >= 128 {
+            return Err(NethernetError::Other(format!(
+                "transport_layer must be less than 128 to avoid overflow, got {}",
+                self.transport_layer
+            )));
+        }
+        if self.connection_type >= 128 {
+            return Err(NethernetError::Other(format!(
+                "connection_type must be less than 128 to avoid overflow, got {}",
+                self.connection_type
+            )));
+        }
+
         let mut buf = Vec::new();
-        
+
         // Write version
-        buf.write_u8(VERSION)?;
-        
+        write_u8(&mut buf, VERSION)?;
+
         // Write server name (u8-prefixed string)
         write_bytes_u8(&mut buf, self.server_name.as_bytes())?;
-        
+
         // Write level name (u8-prefixed string)
         write_bytes_u8(&mut buf, self.level_name.as_bytes())?;
-        
+
         // Write game type (shifted left by 1)
-        buf.write_u8(self.game_type << 1)?;
-        
-        // Write player counts
-        buf.write_i32::<LittleEndian>(self.player_count)?;
-        buf.write_i32::<LittleEndian>(self.max_player_count)?;
-        
+        write_u8(&mut buf, self.game_type << 1)?;
+
+        // Write player counts (i32 little-endian)
+        buf.extend_from_slice(&self.player_count.to_le_bytes());
+        buf.extend_from_slice(&self.max_player_count.to_le_bytes());
+
         // Write booleans
-        buf.write_u8(if self.editor_world { 1 } else { 0 })?;
-        buf.write_u8(if self.hardcore { 1 } else { 0 })?;
-        
+        write_u8(&mut buf, if self.editor_world { 1 } else { 0 })?;
+        write_u8(&mut buf, if self.hardcore { 1 } else { 0 })?;
+
         // Write transport layer and connection type (both shifted left by 1)
-        buf.write_u8(self.transport_layer << 1)?;
-        buf.write_u8(self.connection_type << 1)?;
-        
+        write_u8(&mut buf, self.transport_layer << 1)?;
+        write_u8(&mut buf, self.connection_type << 1)?;
+
         Ok(buf)
     }
 
     /// Decodes ServerData from binary format.
     pub fn unmarshal(data: &[u8]) -> Result<Self> {
         let mut cursor = Cursor::new(data);
-        
+
         // Read and verify version
-        let version = cursor.read_u8()?;
+        let version = read_u8(&mut cursor)?;
         if version != VERSION {
-            return Err(NethernetError::Other(
-                format!("version mismatch: got {}, want {}", version, VERSION)
-            ));
+            return Err(NethernetError::Other(format!(
+                "version mismatch: got {}, want {}",
+                version, VERSION
+            )));
         }
-        
+
         // Read server name
         let server_name_bytes = read_bytes_u8(&mut cursor)?;
         let server_name = String::from_utf8(server_name_bytes)
             .map_err(|e| NethernetError::Other(format!("invalid server name UTF-8: {}", e)))?;
-        
+
         // Read level name
         let level_name_bytes = read_bytes_u8(&mut cursor)?;
         let level_name = String::from_utf8(level_name_bytes)
             .map_err(|e| NethernetError::Other(format!("invalid level name UTF-8: {}", e)))?;
-        
+
         // Read game type (shift right by 1)
-        let game_type = cursor.read_u8()? >> 1;
-        
-        // Read player counts
-        let player_count = cursor.read_i32::<LittleEndian>()?;
-        let max_player_count = cursor.read_i32::<LittleEndian>()?;
-        
+        let game_type = read_u8(&mut cursor)? >> 1;
+
+        // Read player counts (i32 little-endian)
+        let player_count = read_i32_le(&mut cursor)?;
+        let max_player_count = read_i32_le(&mut cursor)?;
+
         // Read booleans
-        let editor_world = cursor.read_u8()? != 0;
-        let hardcore = cursor.read_u8()? != 0;
-        
+        let editor_world = read_u8(&mut cursor)? != 0;
+        let hardcore = read_u8(&mut cursor)? != 0;
+
         // Read transport layer and connection type (both shift right by 1)
-        let transport_layer = cursor.read_u8()? >> 1;
-        let connection_type = cursor.read_u8()? >> 1;
-        
+        let transport_layer = read_u8(&mut cursor)? >> 1;
+        let connection_type = read_u8(&mut cursor)? >> 1;
+
         // Ensure all data was read
         let remaining = data.len() - cursor.position() as usize;
         if remaining != 0 {
             return Err(NethernetError::Other(format!("unread {} bytes", remaining)));
         }
-        
+
         Ok(Self {
             server_name,
             level_name,
