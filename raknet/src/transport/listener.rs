@@ -444,7 +444,7 @@ impl Stream for RaknetListener {
 ///
 /// # async fn example() {
 /// let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
-/// let config = crate::transport::listener::RaknetListenerConfig::default();
+/// let config = raknet::transport::listener::RaknetListenerConfig::default();
 /// let (new_conn_tx, _new_conn_rx) = mpsc::channel(8);
 /// let (_outbound_tx, outbound_rx) = mpsc::channel(8);
 /// let advertisement = Arc::new(RwLock::new(Vec::new()));
