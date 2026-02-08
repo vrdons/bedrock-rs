@@ -22,6 +22,7 @@ const ADDRESS_TIMEOUT: Duration = Duration::from_secs(15);
 /// This is the exact wire format expected by the protocol
 const PING_TOKEN: &str = "Ping";
 
+/// LAN-based signaling implementation for peer discovery and WebRTC negotiation.
 pub struct LanSignaling {
     network_id: u64,
     socket: Arc<UdpSocket>,
@@ -31,7 +32,7 @@ pub struct LanSignaling {
     server_data: Arc<RwLock<Option<ServerData>>>,
     discovered_servers: Arc<AsyncRwLock<HashMap<u64, ServerData>>>,
     cancel_token: CancellationToken,
-    _background_task: JoinHandle<()>,
+    background_task: Option<JoinHandle<()>>,
 }
 
 struct AddressEntry {
@@ -94,17 +95,33 @@ impl LanSignaling {
             server_data,
             discovered_servers,
             cancel_token,
-            _background_task: background_task,
+            background_task: Some(background_task),
         };
 
         Ok(signaling)
     }
 
+    /// Gracefully shuts down the LAN signaling instance.
+    ///
+    /// Cancels the background task and waits for it to complete. This ensures
+    /// that all in-flight operations are finished and no packets will be
+    /// processed after this method returns.
+    ///
+    /// Use this method when you need guaranteed cleanup before proceeding,
+    /// such as before application shutdown or when transitioning to a different
+    /// signaling mechanism.
+    pub async fn shutdown(mut self) {
+        self.cancel_token.cancel();
+        if let Some(task) = self.background_task.take() {
+            let _ = task.await;
+        }
+    }
+
     /// Returns a snapshot of discovered servers keyed by their network ID.
     ///
     /// Clones and returns the current internal map of discovered `ServerData` entries.
-    pub async fn discover(&self) -> Result<HashMap<u64, ServerData>> {
-        Ok(self.discovered_servers.read().await.clone())
+    pub async fn discover(&self) -> HashMap<u64, ServerData> {
+        self.discovered_servers.read().await.clone()
     }
 
     /// Return the last-known socket address for the given network ID, if any.
@@ -353,8 +370,15 @@ impl LanSignaling {
 
 impl Drop for LanSignaling {
     /// Cancels the internal background task when the instance is dropped.
+    ///
+    /// Note: This only signals cancellation but does not wait for the task to complete.
+    /// For graceful shutdown, use the [`shutdown()`](Self::shutdown) method instead.
     fn drop(&mut self) {
         self.cancel_token.cancel();
+        // Abort the task to ensure it stops as soon as possible
+        if let Some(task) = self.background_task.take() {
+            task.abort();
+        }
     }
 }
 

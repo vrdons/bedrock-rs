@@ -26,10 +26,6 @@ pub struct U32LE(pub u32);
 
 impl U32LE {
     /// Reads a 32-bit little-endian unsigned integer from a reader.
-    ///
-    /// # Returns
-    ///
-    /// [`U32LE`] containing the decoded little-endian [`u32`] value.
     pub fn read<R: Read + ?Sized>(r: &mut R) -> io::Result<Self> {
         let mut buf = [0u8; 4];
         r.read_exact(&mut buf)?;
@@ -48,7 +44,6 @@ pub struct U64LE(pub u64);
 
 impl U64LE {
     /// Reads a little-endian 64-bit unsigned integer from a reader.
-    ///
     pub fn read<R: Read + ?Sized>(r: &mut R) -> io::Result<Self> {
         let mut buf = [0u8; 8];
         r.read_exact(&mut buf)?;

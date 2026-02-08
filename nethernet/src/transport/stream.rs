@@ -280,20 +280,6 @@ impl NethernetStream {
     }
 
     /// Constructs a NethernetStream from an existing Session and the peer's socket address.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::net::SocketAddr;
-    /// use std::sync::Arc;
-    ///
-    /// // `session` should be a previously established Arc<Session>.
-    /// let session: Arc<Session> = Arc::new(/* existing session */);
-    /// let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-    /// let stream = NethernetStream::from_session(session.clone(), addr);
-    /// assert_eq!(stream.remote_addr(), addr);
-    /// assert!(Arc::ptr_eq(&stream.session(), &session));
-    /// ```
     pub fn from_session(session: Arc<Session>, remote_addr: SocketAddr) -> Self {
         Self {
             session,
@@ -303,48 +289,26 @@ impl NethernetStream {
     }
 
     /// Transmits a payload to the remote endpoint associated with this stream.
-    ///
-    /// # Parameters
-    ///
-    /// - `data`: the bytes to send to the remote peer.
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` if the payload was sent successfully, `Err` with a `NethernetError` otherwise.
     pub async fn send(&self, data: Bytes) -> Result<()> {
         self.session.send(data).await
     }
 
     /// Receive the next available data frame from this stream.
-    ///
-    /// # Returns
-    ///
-    /// `Ok(Some(bytes))` if a data frame was received, `Ok(None)` if the remote closed the stream, or `Err` if an error occurred.
     pub async fn recv(&self) -> Result<Option<Bytes>> {
         self.session.recv().await
     }
 
     /// Close the stream and its underlying session.
-    ///
-    /// Returns `Ok(())` if the stream was closed successfully, or an error otherwise.
     pub async fn close(&self) -> Result<()> {
         self.session.close().await
     }
 
     /// Get the socket address of the remote endpoint for this stream.
-    ///
-    /// # Returns
-    ///
-    /// `SocketAddr` representing the remote endpoint.
     pub fn remote_addr(&self) -> SocketAddr {
         self.remote_addr
     }
 
     /// Access the underlying session.
-    ///
-    /// # Returns
-    ///
-    /// An `Arc<Session>` cloned from the stream's internal session.
     pub fn session(&self) -> Arc<Session> {
         self.session.clone()
     }
@@ -363,26 +327,6 @@ impl Stream for NethernetStream {
     /// - `Poll::Ready(None)` when the stream has ended (no more data).
     /// - `Poll::Ready(Some(Err(e)))` when an error occurred while receiving.
     /// - `Poll::Pending` when no item is ready yet.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use futures::StreamExt;
-    ///
-    /// // `stream` is a ready `NethernetStream`.
-    /// // let mut stream = obtain_nethernet_stream();
-    /// // Example shows awaiting the next item:
-    /// # async fn doc_example(mut stream: impl futures::Stream<Item = Result<bytes::Bytes, _>> + Unpin) {
-    /// if let Some(item) = stream.next().await {
-    ///     match item {
-    ///         Ok(bytes) => println!("received {} bytes", bytes.len()),
-    ///         Err(e) => eprintln!("receive error: {:?}", e),
-    ///     }
-    /// } else {
-    ///     println!("stream ended");
-    /// }
-    /// # }
-    /// ```
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // If no pending future exists, create one
         if self.pending_recv.is_none() {

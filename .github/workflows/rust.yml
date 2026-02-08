@@ -54,3 +54,54 @@ jobs:
           shared-key: stable
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - run: cargo doc --workspace --no-deps
+
+  bench:
+    runs-on: ubuntu-latest
+    needs: check-approval
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: bench
+          shared-key: stable
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: Cache critcmp
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/critcmp
+          key: critcmp-${{ runner.os }}
+
+      - name: Install critcmp
+        run: |
+          if ! command -v critcmp &> /dev/null; then
+            cargo install critcmp
+          fi
+
+      - name: Restore benchmark baseline
+        uses: actions/cache@v4
+        with:
+          path: target/criterion
+          key: criterion-master
+          restore-keys: |
+            criterion-
+
+      - name: Run benchmarks
+        run: |
+          if [ -d "target/criterion" ] && critcmp --baselines 2>/dev/null | grep -q '^master$'; then
+            cargo bench --benches -- --save-baseline after
+            critcmp -t 5 master after
+          else
+            cargo bench --benches -- --save-baseline master
+          fi
+
+      - name: Update baseline cache
+        if: github.ref == 'refs/heads/master'
+        uses: actions/cache/save@v4
+        with:
+          path: target/criterion
+          key: criterion-master-${{ github.sha }}

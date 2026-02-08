@@ -258,16 +258,6 @@ impl<S: Signaling + 'static> NethernetListener<S> {
     }
 
     /// Waits for and returns the next inbound session.
-    /// 
-    /// # Examples
-    ///
-    /// ```
-    /// # use std::sync::Arc;
-    /// # tokio_test::block_on(async {
-    /// // `listener` must be a previously bound `NethernetListener`.
-    /// let session: Arc<nethernet::transport::session::Session> = listener.accept().await.unwrap();
-    /// # });
-    /// ```
     pub async fn accept(&self) -> Result<Arc<Session>> {
         let mut incoming = self.incoming.lock().await;
         incoming
@@ -283,7 +273,6 @@ impl<S: Signaling + 'static> NethernetListener<S> {
 }
 
 impl<S: Signaling> Drop for NethernetListener<S> {
-    /// Cancels the listener's shutdown token to stop the background signal-handling task.
     fn drop(&mut self) {
         self.cancel_token.cancel();
     }
@@ -297,15 +286,6 @@ impl<S: Signaling + 'static> Stream for NethernetListener<S> {
     /// This attempts to acquire the internal incoming-session mutex without waiting; if the lock is held by
     /// another task, the method returns [`Poll::Pending`]. When the lock is acquired, it delegates to the
     /// inner receiver's poll to produce the next [`Arc<Session>`].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use futures::StreamExt;
-    /// # async fn _example(mut s: impl futures::Stream<Item = std::sync::Arc<crate::Session>> + Unpin) {
-    /// let _next = s.next().await; // awaits the next inbound session
-    /// # }
-    /// ```
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut incoming = match self.incoming.try_lock() {
             Ok(guard) => guard,

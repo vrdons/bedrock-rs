@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::time::sleep(Duration::from_secs(discovery_timeout_secs)).await;
 
     // Get discovered servers
-    let servers = signaling.discover().await?;
+    let servers = signaling.discover().await;
 
     if servers.is_empty() {
         tracing::error!("No servers found on LAN!");

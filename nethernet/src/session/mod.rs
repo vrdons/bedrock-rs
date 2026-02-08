@@ -21,7 +21,7 @@ pub struct Session {
 }
 
 impl Session {
-    /// Create a Session using the default packet channel capacity.
+    /// Creates a Session using the default packet channel capacity.
     pub fn new(peer_connection: Arc<RTCPeerConnection>) -> Self {
         Self::with_capacity(peer_connection, DEFAULT_PACKET_CHANNEL_CAPACITY)
     }
@@ -41,7 +41,7 @@ impl Session {
         }
     }
 
-    /// Attach a reliable RTCDataChannel to the session and route incoming message segments into the session's reassembly pipeline.
+    /// Attaches a reliable RTCDataChannel to the session and route incoming message segments into the session's reassembly pipeline.
     ///
     /// The provided channel will receive an `on_message` handler that decodes incoming bytes as `MessageSegment`s, accumulates segments in the session's internal buffer, and forwards completed messages to the session's packet receiver. The channel is then stored as the session's reliable data channel.
     pub async fn set_reliable_channel(&self, channel: Arc<RTCDataChannel>) -> Result<()> {
@@ -55,7 +55,7 @@ impl Session {
 
             Box::pin(async move {
                 let data_len = data.len();
-                match MessageSegment::decode(data.as_ref()) {
+                match MessageSegment::decode(data.clone()) {
                     Ok(segment) => {
                         let result = {
                             let mut buf = buffer.lock().await;
@@ -99,7 +99,7 @@ impl Session {
         Ok(())
     }
 
-    /// Send data over the session using the reliable data channel, splitting the payload into protocol segments as needed.
+    /// Sends data over the session using the reliable data channel, splitting the payload into protocol segments as needed.
     ///
     /// # Errors
     ///
@@ -131,7 +131,7 @@ impl Session {
         Ok(())
     }
 
-    /// Receive the next complete packet from the session.
+    /// Receives the next complete packet from the session.
     ///
     /// This returns the next reassembled message produced by the session's incoming
     /// segment stream. If the session has been closed, or the underlying packet
@@ -193,7 +193,7 @@ impl Session {
         Ok(())
     }
 
-    /// Return the current ICE connection state of the underlying peer connection.
+    /// Returns the current ICE connection state of the underlying peer connection.
     pub fn connection_state(&self) -> RTCIceConnectionState {
         self.peer_connection.ice_connection_state()
     }
