@@ -75,6 +75,9 @@ impl Message {
         // Set expected_segments if this is the first segment
         if self.expected_segments == 0 && segment.remaining_segments > 0 {
             self.expected_segments = segment.remaining_segments + 1;
+            // Pre-allocate buffer to avoid reallocations
+            let estimated = self.expected_segments as usize * MAX_MESSAGE_SIZE;
+            self.data.reserve(estimated);
         }
 
         // Check segment order
@@ -111,31 +114,42 @@ impl Message {
     /// segment with `remaining_segments` equal to 0. For longer inputs the data
     /// is chunked into segments of at most MAX_MESSAGE_SIZE bytes; the first
     /// returned segment has `remaining_segments = segment_count - 1` and the last
-    /// has `remaining_segments = 0`.
+    /// has `remaining_segments = 0`.#[inline(always)]
     pub fn split_into_segments(data: Bytes) -> Result<Vec<MessageSegment>> {
-        if data.len() <= MAX_MESSAGE_SIZE {
+        let len = data.len();
+
+        if len <= MAX_MESSAGE_SIZE {
             return Ok(vec![MessageSegment::new(0, data)]);
         }
 
-        let mut segments = Vec::new();
-        let mut remaining = data;
+        let segment_count = len.div_ceil(MAX_MESSAGE_SIZE);
 
-        // Calculate segment count
-        let segment_count = remaining.len().div_ceil(MAX_MESSAGE_SIZE);
-
-        // Ensure segment count fits in u8
         if segment_count > 255 {
-            return Err(NethernetError::MessageTooLarge(remaining.len()));
+            return Err(NethernetError::MessageTooLarge(len));
         }
 
-        let mut segments_left = segment_count as u8;
+        // PRE-ALLOC
+        let mut segments = Vec::with_capacity(segment_count);
 
-        while !remaining.is_empty() {
-            segments_left -= 1;
-            let chunk_size = remaining.len().min(MAX_MESSAGE_SIZE);
-            let chunk = remaining.split_to(chunk_size);
-            segments.push(MessageSegment::new(segments_left, chunk));
+        let mut remaining = data;
+        let mut left = segment_count as u8;
+
+        // Fast path
+        while remaining.len() > MAX_MESSAGE_SIZE {
+            left -= 1;
+
+            let chunk = remaining.split_to(MAX_MESSAGE_SIZE);
+
+            segments.push(MessageSegment::new(left, chunk));
         }
+
+        // Last chunk
+        if !remaining.is_empty() {
+            left -= 1;
+            segments.push(MessageSegment::new(left, remaining));
+        }
+
+        debug_assert_eq!(left, 0);
 
         Ok(segments)
     }
@@ -229,15 +243,19 @@ mod tests {
         // Create 10 segments of 100 bytes each
         let segment_data = Bytes::from(vec![0u8; 100]);
         let mut message = Message::new();
-        
+
         // Add the first segment with remaining_segments = 9
         let segment = MessageSegment::new(9, segment_data.clone());
         message.add_segment(segment).unwrap();
-        
+
         // Capacity should be at least 10 * 100 = 1000
         // and significantly less than 10 * MAX_MESSAGE_SIZE (100,000)
         let capacity = message.data.capacity();
         assert!(capacity >= 1000, "Capacity {} too small", capacity);
-        assert!(capacity < 50000, "Capacity {} too large (over-allocation)", capacity);
+        assert!(
+            capacity < 50000,
+            "Capacity {} too large (over-allocation)",
+            capacity
+        );
     }
 }

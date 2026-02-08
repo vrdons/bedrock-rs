@@ -1,9 +1,7 @@
 use bytes::Bytes;
-use criterion::{
-    criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput,
-};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use nethernet::protocol::packet::discovery::{
-    marshal, unmarshal, MessagePacket, RequestPacket, ResponsePacket,
+    MessagePacket, RequestPacket, ResponsePacket, marshal, unmarshal,
 };
 use nethernet::protocol::{Message, MessageSegment};
 use std::hint::black_box;
@@ -17,28 +15,23 @@ fn bench_message_encode(c: &mut Criterion) {
     for size in [64, 256, 512, 1024, 4096] {
         group.throughput(Throughput::Bytes(size as u64));
 
-        group.bench_with_input(
-            BenchmarkId::from_parameter(size),
-            &size,
-            |b, &size| {
-                let payload = vec![0u8; size];
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+            let payload = vec![0u8; size];
 
-                let segment = MessageSegment {
-                    remaining_segments: 0,
-                    data: Bytes::from(payload),
-                };
+            let segment = MessageSegment {
+                remaining_segments: 0,
+                data: Bytes::from(payload),
+            };
 
-                b.iter(|| {
-                    let encoded = segment.encode();
-                    black_box(encoded);
-                });
-            },
-        );
+            b.iter(|| {
+                let encoded = segment.encode();
+                black_box(encoded);
+            });
+        });
     }
 
     group.finish();
 }
-
 
 fn bench_message_decode(c: &mut Criterion) {
     let mut group = c.benchmark_group("message_decode");
@@ -55,26 +48,20 @@ fn bench_message_decode(c: &mut Criterion) {
 
         group.throughput(Throughput::Bytes(encoded.len() as u64));
 
-        group.bench_with_input(
-            BenchmarkId::from_parameter(size),
-            &encoded,
-            |b, encoded| {
-                b.iter_batched(
-                    || encoded.clone(),
-                    |data| {
-                        let decoded =
-                            MessageSegment::decode(black_box(data)).unwrap();
-                        black_box(decoded);
-                    },
-                    BatchSize::SmallInput,
-                );
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(size), &encoded, |b, encoded| {
+            b.iter_batched(
+                || encoded.clone(),
+                |data| {
+                    let decoded = MessageSegment::decode(black_box(data)).unwrap();
+                    black_box(decoded);
+                },
+                BatchSize::SmallInput,
+            );
+        });
     }
 
     group.finish();
 }
-
 
 fn bench_message_segmentation(c: &mut Criterion) {
     let mut group = c.benchmark_group("message_segmentation");
@@ -82,23 +69,18 @@ fn bench_message_segmentation(c: &mut Criterion) {
     for size in [1024, 4096, 8192, 16384] {
         group.throughput(Throughput::Bytes(size as u64));
 
-        group.bench_with_input(
-            BenchmarkId::from_parameter(size),
-            &size,
-            |b, &size| {
-                let payload = Bytes::from(vec![0u8; size]);
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+            let payload = Bytes::from(vec![0u8; size]);
 
-                b.iter_batched(
-                    || payload.clone(),
-                    |data| {
-                        let segments =
-                            Message::split_into_segments(black_box(data)).unwrap();
-                        black_box(segments);
-                    },
-                    BatchSize::SmallInput,
-                );
-            },
-        );
+            b.iter_batched(
+                || payload.clone(),
+                |data| {
+                    let segments = Message::split_into_segments(black_box(data)).unwrap();
+                    black_box(segments);
+                },
+                BatchSize::SmallInput,
+            );
+        });
     }
 
     group.finish();
@@ -112,8 +94,7 @@ fn bench_discovery_marshal(c: &mut Criterion) {
         let packet = RequestPacket;
 
         b.iter(|| {
-            let marshaled =
-                marshal(black_box(&packet), black_box(SENDER_ID)).unwrap();
+            let marshaled = marshal(black_box(&packet), black_box(SENDER_ID)).unwrap();
             black_box(marshaled);
         });
     });
@@ -129,11 +110,7 @@ fn bench_discovery_marshal(c: &mut Criterion) {
                 let packet = ResponsePacket::new(vec![0u8; size]);
 
                 b.iter(|| {
-                    let marshaled = marshal(
-                        black_box(&packet),
-                        black_box(SENDER_ID),
-                    )
-                    .unwrap();
+                    let marshaled = marshal(black_box(&packet), black_box(SENDER_ID)).unwrap();
 
                     black_box(marshaled);
                 });
@@ -151,15 +128,10 @@ fn bench_discovery_marshal(c: &mut Criterion) {
             BenchmarkId::new("message_packet", size),
             &data,
             |b, data| {
-                let packet =
-                    MessagePacket::new(0x9876543210fedcba, data.clone());
+                let packet = MessagePacket::new(0x9876543210fedcba, data.clone());
 
                 b.iter(|| {
-                    let marshaled = marshal(
-                        black_box(&packet),
-                        black_box(SENDER_ID),
-                    )
-                    .unwrap();
+                    let marshaled = marshal(black_box(&packet), black_box(SENDER_ID)).unwrap();
 
                     black_box(marshaled);
                 });
@@ -204,8 +176,7 @@ fn bench_discovery_unmarshal(c: &mut Criterion) {
                 b.iter_batched(
                     || marshaled.clone(),
                     |data| {
-                        let (pkt, _) =
-                            unmarshal(black_box(&data)).unwrap();
+                        let (pkt, _) = unmarshal(black_box(&data)).unwrap();
                         black_box(pkt);
                     },
                     BatchSize::SmallInput,
@@ -218,8 +189,7 @@ fn bench_discovery_unmarshal(c: &mut Criterion) {
     for size in [64, 256, 1024] {
         let data = "x".repeat(size);
 
-        let packet =
-            MessagePacket::new(0x9876543210fedcba, data);
+        let packet = MessagePacket::new(0x9876543210fedcba, data);
 
         let marshaled = marshal(&packet, SENDER_ID).unwrap();
 
@@ -232,8 +202,7 @@ fn bench_discovery_unmarshal(c: &mut Criterion) {
                 b.iter_batched(
                     || marshaled.clone(),
                     |data| {
-                        let (pkt, _) =
-                            unmarshal(black_box(&data)).unwrap();
+                        let (pkt, _) = unmarshal(black_box(&data)).unwrap();
                         black_box(pkt);
                     },
                     BatchSize::SmallInput,
@@ -245,7 +214,6 @@ fn bench_discovery_unmarshal(c: &mut Criterion) {
     group.finish();
 }
 
-
 fn bench_discovery_roundtrip(c: &mut Criterion) {
     let mut group = c.benchmark_group("discovery_roundtrip");
 
@@ -254,8 +222,7 @@ fn bench_discovery_roundtrip(c: &mut Criterion) {
         let packet = RequestPacket;
 
         b.iter(|| {
-            let marshaled =
-                marshal(black_box(&packet), black_box(SENDER_ID)).unwrap();
+            let marshaled = marshal(black_box(&packet), black_box(SENDER_ID)).unwrap();
 
             let (pkt, _) = unmarshal(&marshaled).unwrap();
 
@@ -274,14 +241,9 @@ fn bench_discovery_roundtrip(c: &mut Criterion) {
                 let packet = ResponsePacket::new(vec![0u8; size]);
 
                 b.iter(|| {
-                    let marshaled = marshal(
-                        black_box(&packet),
-                        black_box(SENDER_ID),
-                    )
-                    .unwrap();
+                    let marshaled = marshal(black_box(&packet), black_box(SENDER_ID)).unwrap();
 
-                    let (pkt, _) =
-                        unmarshal(&marshaled).unwrap();
+                    let (pkt, _) = unmarshal(&marshaled).unwrap();
 
                     black_box(pkt);
                 });
@@ -299,18 +261,12 @@ fn bench_discovery_roundtrip(c: &mut Criterion) {
             BenchmarkId::new("message_packet", size),
             &data,
             |b, data| {
-                let packet =
-                    MessagePacket::new(0x9876543210fedcba, data.clone());
+                let packet = MessagePacket::new(0x9876543210fedcba, data.clone());
 
                 b.iter(|| {
-                    let marshaled = marshal(
-                        black_box(&packet),
-                        black_box(SENDER_ID),
-                    )
-                    .unwrap();
+                    let marshaled = marshal(black_box(&packet), black_box(SENDER_ID)).unwrap();
 
-                    let (pkt, _) =
-                        unmarshal(&marshaled).unwrap();
+                    let (pkt, _) = unmarshal(&marshaled).unwrap();
 
                     black_box(pkt);
                 });
@@ -320,7 +276,6 @@ fn bench_discovery_roundtrip(c: &mut Criterion) {
 
     group.finish();
 }
-
 
 criterion_group! {
     name = benches;

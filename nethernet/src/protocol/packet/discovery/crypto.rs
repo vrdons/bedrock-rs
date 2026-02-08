@@ -31,66 +31,60 @@ static HMAC_STATE: LazyLock<Hmac<Sha256>> = LazyLock::new(|| {
         .expect("HMAC can take key of any size")
 });
 
-/// Encrypts the given bytes using AES-256 in ECB mode with PKCS#7 padding.
+/// Encrypts the given buffer in-place using AES-256 in ECB mode with PKCS#7 padding.
 ///
-/// The input is padded to a 16-byte boundary and each block is encrypted; the returned
-/// [`Vec<u8>`] contains the ciphertext whose length is a multiple of 16 bytes.
-pub(crate) fn encrypt(data: &[u8]) -> Result<Vec<u8>> {
+/// The buffer is resized to include PKCS#7 padding (multiple of 16 bytes) before encryption.
+pub(crate) fn encrypt(buf: &mut Vec<u8>) -> Result<()> {
     // Apply PKCS7 padding
     let block_size = 16;
-    let padding_len = block_size - (data.len() % block_size);
-    let mut padded = Vec::with_capacity(data.len() + padding_len);
-    padded.extend_from_slice(data);
-    padded.resize(data.len() + padding_len, padding_len as u8);
+    let data_len = buf.len();
+    let padding_len = block_size - (data_len % block_size);
+    buf.resize(data_len + padding_len, padding_len as u8);
 
-    // Encrypt blocks in parallel (if supported by hardware)
+    // Encrypt blocks in-place
     // Safety: GenericArray/Block is repr(transparent) over [u8; 16]
     let blocks = unsafe {
         std::slice::from_raw_parts_mut(
-            padded.as_mut_ptr() as *mut Block<Aes256>,
-            padded.len() / block_size,
+            buf.as_mut_ptr() as *mut Block<Aes256>,
+            buf.len() / block_size,
         )
     };
     CIPHER.encrypt_blocks(blocks);
 
-    Ok(padded)
+    Ok(())
 }
 
-/// Decrypts a byte slice that was encrypted with AES-256-ECB and PKCS#7 padding.
+/// Decrypts the given buffer in-place using AES-256 in ECB mode and removes PKCS#7 padding.
 ///
-/// Returns the decrypted plaintext on success. Returns an error if the input length is zero or not a multiple of 16, or if PKCS#7 padding is invalid.
-pub(crate) fn decrypt(data: &[u8]) -> Result<Vec<u8>> {
-    if data.is_empty() || data.len() % 16 != 0 {
+/// Returns an error if the input length is zero or not a multiple of 16, or if PKCS#7 padding is invalid.
+pub(crate) fn decrypt(buf: &mut Vec<u8>) -> Result<()> {
+    if buf.is_empty() || buf.len() % 16 != 0 {
         return Err(NethernetError::Other(
             "Invalid encrypted data length".to_string(),
         ));
     }
 
-    // Decrypt blocks in parallel (if supported by hardware)
-    let mut decrypted = data.to_vec();
+    // Decrypt blocks in-place
     // Safety: GenericArray/Block is repr(transparent) over [u8; 16]
     let blocks = unsafe {
-        std::slice::from_raw_parts_mut(
-            decrypted.as_mut_ptr() as *mut Block<Aes256>,
-            decrypted.len() / 16,
-        )
+        std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut Block<Aes256>, buf.len() / 16)
     };
     CIPHER.decrypt_blocks(blocks);
 
     // Remove PKCS7 padding
-    if let Some(&padding_len) = decrypted.last() {
+    if let Some(&padding_len) = buf.last() {
         if padding_len > 0 && padding_len <= 16 {
-            let data_len = decrypted.len();
+            let data_len = buf.len();
             if data_len >= padding_len as usize {
                 // Verify padding (constant-time)
                 let padding_start = data_len - padding_len as usize;
                 let mut mismatched: u8 = 0;
-                for &byte in &decrypted[padding_start..] {
+                for &byte in &buf[padding_start..] {
                     mismatched |= byte ^ padding_len;
                 }
                 if mismatched == 0 {
-                    decrypted.truncate(padding_start);
-                    return Ok(decrypted);
+                    buf.truncate(padding_start);
+                    return Ok(());
                 }
             }
         }
@@ -127,9 +121,10 @@ mod tests {
     #[test]
     fn test_encrypt_decrypt() {
         let data = b"Hello, NetherNet!";
-        let encrypted = encrypt(data).unwrap();
-        let decrypted = decrypt(&encrypted).unwrap();
-        assert_eq!(data.as_slice(), decrypted.as_slice());
+        let mut buf = data.to_vec();
+        encrypt(&mut buf).unwrap();
+        decrypt(&mut buf).unwrap();
+        assert_eq!(data.as_slice(), buf.as_slice());
     }
 
     #[test]
@@ -141,5 +136,4 @@ mod tests {
         let wrong_checksum = [0u8; 32];
         assert!(!verify_checksum(data, &wrong_checksum));
     }
-
 }

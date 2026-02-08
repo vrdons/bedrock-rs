@@ -72,43 +72,54 @@ impl Header {
 /// A [`Vec<u8>`] containing the serialized packet: the 32-byte HMAC-SHA256 checksum followed by the AES-ECB encrypted payload.
 pub fn marshal(packet: &dyn Packet, sender_id: u64) -> Result<Vec<u8>> {
     // Discovery packets are generally small (header 18 bytes + length 2 bytes + packet data)
-    // Pre-allocating a reasonable default size to avoid multiple re-allocations.
-    let mut payload = Vec::with_capacity(128);
+    // We pre-allocate enough space for checksum (32), length (2), header (18), packet data, and potential padding (up to 16)
+    let mut buf = Vec::with_capacity(32 + 2 + 18 + 64 + 16);
+
+    // Placeholder for HMAC-SHA256 checksum (32 bytes)
+    buf.extend_from_slice(&[0u8; 32]);
 
     // Placeholder for length (U16LE)
-    payload.extend_from_slice(&[0u8; 2]);
+    buf.extend_from_slice(&[0u8; 2]);
 
-    // Write header directly into payload
+    // Write header directly into buffer
     let header = Header {
         packet_id: packet.id(),
         sender_id,
     };
-    header.write(&mut payload)?;
+    header.write(&mut buf)?;
 
-    // Write packet data directly into payload
-    packet.write(&mut payload)?;
+    // Write packet data directly into buffer
+    packet.write(&mut buf)?;
 
-    // Fill the actual length at the beginning
-    let total_len = payload.len();
-    if total_len > u16::MAX as usize {
-        return Err(NethernetError::MessageTooLarge(total_len));
+    // Fill the actual length
+    let total_len = buf.len();
+    if total_len - 32 > u16::MAX as usize {
+        return Err(NethernetError::MessageTooLarge(total_len - 32));
     }
 
-    let data_len = (total_len - 2) as u16;
-    payload[..2].copy_from_slice(&data_len.to_le_bytes());
+    let data_len = (total_len - 32 - 2) as u16;
+    buf[32..34].copy_from_slice(&data_len.to_le_bytes());
 
-    // Encrypt the payload
-    let encrypted = encrypt(&payload)?;
+    // Compute HMAC-SHA256 checksum of the payload (everything after the 32-byte checksum placeholder)
+    let checksum = compute_checksum(&buf[32..]);
+    buf[..32].copy_from_slice(&checksum);
 
-    // Compute HMAC-SHA256 checksum
-    let checksum = compute_checksum(&payload);
+    // Encrypt the payload in-place
+    // We need to extract the payload part to a temporary Vec or manage it carefully.
+    // Since encrypt() now takes &mut Vec<u8>, we can't easily pass a slice of it.
+    // However, we want to avoid double allocation.
 
-    // Combine checksum + encrypted data
-    let mut result = Vec::with_capacity(32 + encrypted.len());
-    result.extend_from_slice(&checksum);
-    result.extend_from_slice(&encrypted);
+    // Let's modify encrypt slightly to take a slice or just handle the Vec here.
+    // Actually, the easiest way to achieve "zero copy" (or close to it) with the current API
+    // is to split the buffer or use a temporary Vec for the payload part then join.
+    // But the user asked for struct -> Vec -> encrypt -> Vec transition.
 
-    Ok(result)
+    let mut payload = buf.split_off(32);
+    encrypt(&mut payload)?;
+
+    buf.extend_from_slice(&payload);
+
+    Ok(buf)
 }
 
 /// Decodes and verifies a discovery packet from raw bytes, returning the parsed packet and its sender ID.
@@ -129,11 +140,12 @@ pub fn unmarshal(data: &[u8]) -> Result<(Box<dyn Packet>, u64)> {
 
     // Extract checksum and encrypted payload
     let checksum: [u8; 32] = data[..32].try_into().unwrap();
-    
-    // Decrypt directly into a new Vec
-    let payload = decrypt(&data[32..])?;
 
-    // Verify checksum
+    // Copy only the encrypted part into a Vec for in-place decryption
+    let mut payload = data[32..].to_vec();
+    decrypt(&mut payload)?;
+
+    // Verify checksum against decrypted payload
     if !verify_checksum(&payload, &checksum) {
         return Err(NethernetError::Other("checksum mismatch".to_string()));
     }
