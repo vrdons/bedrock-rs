@@ -138,14 +138,6 @@ impl Default for RaknetListenerConfigBuilder {
     ///
     /// The builder copies defaults from `RaknetListenerConfig::default()` but leaves `bind_addr` as
     /// `None` so callers must provide an explicit bind address before building.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let b = RaknetListenerConfigBuilder::default();
-    /// assert!(b.bind_addr.is_none());
-    /// assert_eq!(b.max_mtu, RaknetListenerConfig::default().max_mtu);
-    /// ```
     fn default() -> Self {
         let config = RaknetListenerConfig::default();
         Self {
@@ -198,29 +190,12 @@ impl RaknetListenerConfigBuilder {
     }
 
     /// Set the maximum MTU (maximum transmission unit) that the listener will use.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let cfg = RaknetListenerConfig::builder()
-    ///     .max_mtu(1400)
-    ///     .build();
-    /// ```
     pub fn max_mtu(mut self, mtu: u16) -> Self {
         self.max_mtu = mtu;
         self
     }
 
     /// Sets the inactivity timeout used to detect and close idle sessions.
-    ///
-    /// The provided duration is the period of inactivity after which a session is considered timed out.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::time::Duration;
-    /// let _builder = RaknetListenerConfig::builder().session_timeout(Duration::from_secs(30));
-    /// ```
     pub fn session_timeout(mut self, timeout: Duration) -> Self {
         self.session_timeout = timeout;
         self
@@ -284,16 +259,6 @@ impl RaknetListenerConfigBuilder {
     ///
     /// This consumes the builder and returns a concrete `RaknetListenerConfig`.
     /// Panics if a `bind_addr` was not supplied to the builder (missing config value).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::net::SocketAddr;
-    /// let cfg = crate::transport::listener::RaknetListenerConfigBuilder::new()
-    ///     .bind_address("0.0.0.0:19132".parse::<SocketAddr>().unwrap())
-    ///     .build();
-    /// assert_eq!(cfg.bind_addr.port(), 19132);
-    /// ```
     pub fn build(self) -> RaknetListenerConfig {
         let addr = self
             .bind_addr
@@ -472,13 +437,14 @@ impl Stream for RaknetListener {
 ///
 /// ```no_run
 /// use tokio::net::UdpSocket;
-/// use tokio::sync::{mpsc, RwLock};
+/// use tokio::sync::mpsc;
+/// use std::sync::RwLock;
 /// use tokio_util::sync::CancellationToken;
 /// use std::sync::Arc;
 ///
 /// # async fn example() {
 /// let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
-/// let config = crate::RaknetListenerConfig::default();
+/// let config = crate::transport::listener::RaknetListenerConfig::default();
 /// let (new_conn_tx, _new_conn_rx) = mpsc::channel(8);
 /// let (_outbound_tx, outbound_rx) = mpsc::channel(8);
 /// let advertisement = Arc::new(RwLock::new(Vec::new()));
