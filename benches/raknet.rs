@@ -398,19 +398,15 @@ fn bench_ack_payload(c: &mut Criterion) {
 
         let encoded = buf.freeze();
 
-        group.bench_with_input(
-            BenchmarkId::new("encode", count),
-            &payload,
-            |b, payload| {
-                b.iter(|| {
-                    let mut b2 = BytesMut::with_capacity(256);
+        group.bench_with_input(BenchmarkId::new("encode", count), &payload, |b, payload| {
+            b.iter(|| {
+                let mut b2 = BytesMut::with_capacity(256);
 
-                    payload.encode_raknet(black_box(&mut b2)).unwrap();
+                payload.encode_raknet(black_box(&mut b2)).unwrap();
 
-                    black_box(b2);
-                });
-            },
-        );
+                black_box(b2);
+            });
+        });
 
         group.bench_with_input(BenchmarkId::new("decode", count), &encoded, |b, encoded| {
             b.iter_batched(
