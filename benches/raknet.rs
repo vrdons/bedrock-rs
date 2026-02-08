@@ -2,10 +2,10 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use raknet::protocol::{
     ack::{AckNackPayload, SequenceRange},
-    constants::{DatagramFlags, DEFAULT_UNCONNECTED_MAGIC},
+    constants::{DEFAULT_UNCONNECTED_MAGIC, DatagramFlags},
     datagram::{Datagram, DatagramPayload},
     encapsulated_packet::{EncapsulatedPacket, SplitInfo},
-    packet::{RaknetEncodable, UnconnectedPing, UnconnectedPong, Packet},
+    packet::{Packet, RaknetEncodable, UnconnectedPing, UnconnectedPong},
     reliability::Reliability,
     types::{Advertisement, DatagramHeader, EncapsulatedPacketHeader, RaknetTime, Sequence24},
 };
@@ -68,12 +68,37 @@ fn create_test_ack_payload(range_count: usize) -> AckNackPayload {
     AckNackPayload { ranges }
 }
 
+fn create_test_split_packet() -> EncapsulatedPacket {
+    EncapsulatedPacket {
+        header: EncapsulatedPacketHeader {
+            reliability: Reliability::ReliableOrdered,
+            is_split: true,
+            needs_bas: false,
+        },
+        bit_length: 512,
+        reliable_index: Some(Sequence24::new(0)),
+        sequence_index: None,
+        ordering_index: Some(Sequence24::new(0)),
+        ordering_channel: Some(0),
+        split: Some(SplitInfo {
+            count: 10,
+            id: 1,
+            index: 5,
+        }),
+        payload: Bytes::from(vec![0u8; 64]),
+    }
+}
+
 // Datagram encoding/decoding benchmarks
 fn bench_datagram_encode(c: &mut Criterion) {
     let mut group = c.benchmark_group("datagram_encode");
 
     for packet_count in [1, 4, 8, 16].iter() {
-        group.throughput(Throughput::Bytes((*packet_count as u64) * 64));
+        let datagram = create_test_datagram(*packet_count);
+        let mut buf = BytesMut::with_capacity(1400);
+        datagram.encode(&mut buf).unwrap();
+        group.throughput(Throughput::Bytes(buf.len() as u64));
+
         group.bench_with_input(
             BenchmarkId::from_parameter(packet_count),
             packet_count,
@@ -95,7 +120,11 @@ fn bench_datagram_decode(c: &mut Criterion) {
     let mut group = c.benchmark_group("datagram_decode");
 
     for packet_count in [1, 4, 8, 16].iter() {
-        group.throughput(Throughput::Bytes((*packet_count as u64) * 64));
+        let datagram = create_test_datagram(*packet_count);
+        let mut buf = BytesMut::with_capacity(1400);
+        datagram.encode(&mut buf).unwrap();
+        group.throughput(Throughput::Bytes(buf.len() as u64));
+
         group.bench_with_input(
             BenchmarkId::from_parameter(packet_count),
             packet_count,
@@ -122,7 +151,11 @@ fn bench_datagram_roundtrip(c: &mut Criterion) {
     let mut group = c.benchmark_group("datagram_roundtrip");
 
     for packet_count in [1, 4, 8, 16].iter() {
-        group.throughput(Throughput::Bytes((*packet_count as u64) * 64));
+        let datagram = create_test_datagram(*packet_count);
+        let mut buf = BytesMut::with_capacity(1400);
+        datagram.encode(&mut buf).unwrap();
+        group.throughput(Throughput::Bytes(buf.len() as u64));
+
         group.bench_with_input(
             BenchmarkId::from_parameter(packet_count),
             packet_count,
@@ -211,24 +244,7 @@ fn bench_split_packet_encode(c: &mut Criterion) {
     let mut group = c.benchmark_group("split_packet_encode");
 
     group.bench_function("with_split_info", |b| {
-        let packet = EncapsulatedPacket {
-            header: EncapsulatedPacketHeader {
-                reliability: Reliability::ReliableOrdered,
-                is_split: true,
-                needs_bas: false,
-            },
-            bit_length: 512,
-            reliable_index: Some(Sequence24::new(0)),
-            sequence_index: None,
-            ordering_index: Some(Sequence24::new(0)),
-            ordering_channel: Some(0),
-            split: Some(SplitInfo {
-                count: 10,
-                id: 1,
-                index: 5,
-            }),
-            payload: Bytes::from(vec![0u8; 64]),
-        };
+        let packet = create_test_split_packet();
 
         b.iter(|| {
             let mut buf = BytesMut::with_capacity(128);
@@ -244,24 +260,7 @@ fn bench_split_packet_decode(c: &mut Criterion) {
     let mut group = c.benchmark_group("split_packet_decode");
 
     group.bench_function("with_split_info", |b| {
-        let packet = EncapsulatedPacket {
-            header: EncapsulatedPacketHeader {
-                reliability: Reliability::ReliableOrdered,
-                is_split: true,
-                needs_bas: false,
-            },
-            bit_length: 512,
-            reliable_index: Some(Sequence24::new(0)),
-            sequence_index: None,
-            ordering_index: Some(Sequence24::new(0)),
-            ordering_channel: Some(0),
-            split: Some(SplitInfo {
-                count: 10,
-                id: 1,
-                index: 5,
-            }),
-            payload: Bytes::from(vec![0u8; 64]),
-        };
+        let packet = create_test_split_packet();
 
         let mut buf = BytesMut::with_capacity(128);
         packet.encode_raknet(&mut buf).unwrap();
@@ -281,24 +280,7 @@ fn bench_split_packet_roundtrip(c: &mut Criterion) {
     let mut group = c.benchmark_group("split_packet_roundtrip");
 
     group.bench_function("with_split_info", |b| {
-        let packet = EncapsulatedPacket {
-            header: EncapsulatedPacketHeader {
-                reliability: Reliability::ReliableOrdered,
-                is_split: true,
-                needs_bas: false,
-            },
-            bit_length: 512,
-            reliable_index: Some(Sequence24::new(0)),
-            sequence_index: None,
-            ordering_index: Some(Sequence24::new(0)),
-            ordering_channel: Some(0),
-            split: Some(SplitInfo {
-                count: 10,
-                id: 1,
-                index: 5,
-            }),
-            payload: Bytes::from(vec![0u8; 64]),
-        };
+        let packet = create_test_split_packet();
 
         b.iter(|| {
             let mut buf = BytesMut::with_capacity(128);
@@ -327,7 +309,8 @@ fn bench_unconnected_packets(c: &mut Criterion) {
     ping.encode_body(&mut ping_buf).unwrap();
     let encoded_ping = ping_buf.freeze();
 
-    let ad_data = Bytes::from("MCPE;Test Server;390;1.14.60;0;20;12345;World;Survival;1;19132;19133;");
+    let ad_data =
+        Bytes::from("MCPE;Test Server;390;1.14.60;0;20;12345;World;Survival;1;19132;19133;");
     let pong = UnconnectedPong {
         ping_time: RaknetTime(1000),
         server_guid: 0x1234567890abcdef,
@@ -381,7 +364,7 @@ fn bench_unconnected_packets(c: &mut Criterion) {
     });
 
     // Ping/Pong round-trip
-    group.bench_function("ping_pong_roundtrip", |b| {
+    group.bench_function("ping_roundtrip", |b| {
         b.iter(|| {
             // Encode ping
             let mut buf = BytesMut::with_capacity(32);
@@ -532,8 +515,10 @@ fn bench_reliability_checks(c: &mut Criterion) {
             reliability,
             |b, &rel| {
                 b.iter(|| {
-                    let result = black_box(rel).is_reliable();
-                    black_box(result);
+                    for _ in 0..1000 {
+                        let result = black_box(rel).is_reliable();
+                        black_box(result);
+                    }
                 });
             },
         );
@@ -543,8 +528,10 @@ fn bench_reliability_checks(c: &mut Criterion) {
             reliability,
             |b, &rel| {
                 b.iter(|| {
-                    let result = black_box(rel).is_ordered();
-                    black_box(result);
+                    for _ in 0..1000 {
+                        let result = black_box(rel).is_ordered();
+                        black_box(result);
+                    }
                 });
             },
         );
