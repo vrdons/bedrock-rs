@@ -139,7 +139,7 @@ impl Message {
 }
 
 impl Default for Message {
-    /// Creates a new [`Message`] initialized for assembling or emitting segmented messages.
+    /// Creates a new [`Message`] initialized for assembling messages.
     ///
     /// # Returns
     ///

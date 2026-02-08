@@ -25,10 +25,6 @@ impl ResponsePacket {
 
 impl Packet for ResponsePacket {
     /// Provides the packet identifier for a discovery response packet.
-    ///
-    /// # Returns
-    ///
-    /// The packet identifier value [`ID_RESPONSE_PACKET`].
     fn id(&self) -> u16 {
         ID_RESPONSE_PACKET
     }

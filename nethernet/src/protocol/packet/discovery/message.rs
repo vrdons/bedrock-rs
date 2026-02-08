@@ -31,10 +31,6 @@ impl MessagePacket {
 
 impl Packet for MessagePacket {
     /// Packet identifier for a MessagePacket.
-    ///
-    /// # Returns
-    ///
-    /// The packet identifier value [`ID_MESSAGE_PACKET`].
     fn id(&self) -> u16 {
         ID_MESSAGE_PACKET
     }

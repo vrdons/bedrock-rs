@@ -16,18 +16,6 @@ pub enum SignalType {
 }
 
 impl SignalType {
-    /// Get the protocol wire string corresponding to the signal type.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use crate::SignalType;
-    ///
-    /// assert_eq!(SignalType::Offer.as_str(), "CONNECTREQUEST");
-    /// assert_eq!(SignalType::Answer.as_str(), "CONNECTRESPONSE");
-    /// assert_eq!(SignalType::Candidate.as_str(), "CANDIDATEADD");
-    /// assert_eq!(SignalType::Error.as_str(), "CONNECTERROR");
-    /// ```
     pub fn as_str(&self) -> &'static str {
         match self {
             SignalType::Offer => "CONNECTREQUEST",

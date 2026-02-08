@@ -15,10 +15,6 @@ pub struct RequestPacket;
 
 impl Packet for RequestPacket {
     /// Get the packet identifier for a discovery request.
-    /// 
-    /// # RETURNS
-    /// 
-    /// The packet identifier value [`ID_REQUEST_PACKET`].
     fn id(&self) -> u16 {
         ID_REQUEST_PACKET
     }

@@ -258,16 +258,6 @@ impl<S: Signaling + 'static> NethernetListener<S> {
     }
 
     /// Waits for and returns the next inbound session.
-    /// 
-    /// # Examples
-    ///
-    /// ```
-    /// # use std::sync::Arc;
-    /// # tokio_test::block_on(async {
-    /// // `listener` must be a previously bound `NethernetListener`.
-    /// let session: Arc<nethernet::transport::session::Session> = listener.accept().await.unwrap();
-    /// # });
-    /// ```
     pub async fn accept(&self) -> Result<Arc<Session>> {
         let mut incoming = self.incoming.lock().await;
         incoming
@@ -283,7 +273,6 @@ impl<S: Signaling + 'static> NethernetListener<S> {
 }
 
 impl<S: Signaling> Drop for NethernetListener<S> {
-    /// Cancels the listener's shutdown token to stop the background signal-handling task.
     fn drop(&mut self) {
         self.cancel_token.cancel();
     }
