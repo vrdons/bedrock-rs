@@ -120,8 +120,8 @@ impl LanSignaling {
     /// Returns a snapshot of discovered servers keyed by their network ID.
     ///
     /// Clones and returns the current internal map of discovered `ServerData` entries.
-    pub async fn discover(&self) -> Result<HashMap<u64, ServerData>> {
-        Ok(self.discovered_servers.read().await.clone())
+    pub async fn discover(&self) -> HashMap<u64, ServerData> {
+        self.discovered_servers.read().await.clone()
     }
 
     /// Return the last-known socket address for the given network ID, if any.
