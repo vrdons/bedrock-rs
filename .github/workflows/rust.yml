@@ -68,7 +68,7 @@ jobs:
         with:
           prefix-key: bench
           shared-key: stable
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Cache critcmp
         uses: actions/cache@v4
@@ -86,24 +86,22 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target/criterion
-          key: criterion-main
+          key: criterion-master
           restore-keys: |
             criterion-
 
       - name: Run benchmarks
-        run: cargo bench --all-targets
-
-      - name: Compare benchmarks
         run: |
           if [ -d "target/criterion/data" ]; then
-            critcmp --threshold 5 target/criterion
+            cargo bench --all-targets -- --save-baseline after
+            critcmp -t 5 master after
           else
-            echo "No baseline yet, skipping comparison"
+            cargo bench --all-targets -- --save-baseline master
           fi
 
       - name: Update baseline cache
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/master'
         uses: actions/cache/save@v4
         with:
           path: target/criterion
-          key: criterion-main-${{ github.sha }}
+          key: criterion-master-${{ github.sha }}
