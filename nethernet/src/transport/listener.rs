@@ -286,15 +286,6 @@ impl<S: Signaling + 'static> Stream for NethernetListener<S> {
     /// This attempts to acquire the internal incoming-session mutex without waiting; if the lock is held by
     /// another task, the method returns [`Poll::Pending`]. When the lock is acquired, it delegates to the
     /// inner receiver's poll to produce the next [`Arc<Session>`].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use futures::StreamExt;
-    /// # async fn _example(mut s: impl futures::Stream<Item = std::sync::Arc<crate::Session>> + Unpin) {
-    /// let _next = s.next().await; // awaits the next inbound session
-    /// # }
-    /// ```
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut incoming = match self.incoming.try_lock() {
             Ok(guard) => guard,
