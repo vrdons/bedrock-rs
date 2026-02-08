@@ -114,7 +114,8 @@ impl Message {
     /// segment with `remaining_segments` equal to 0. For longer inputs the data
     /// is chunked into segments of at most MAX_MESSAGE_SIZE bytes; the first
     /// returned segment has `remaining_segments = segment_count - 1` and the last
-    /// has `remaining_segments = 0`.#[inline(always)]
+    /// has `remaining_segments = 0`.
+    #[inline(always)]
     pub fn split_into_segments(data: Bytes) -> Result<Vec<MessageSegment>> {
         let len = data.len();
 
