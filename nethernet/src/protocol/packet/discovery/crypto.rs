@@ -22,33 +22,36 @@ static ENCRYPTION_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
     key
 });
 
-/// Access the module's static 32-byte encryption key.
-///
-/// The key is computed once at initialization and cached; this function returns
-/// a static reference to that 32-byte key for use in encryption and HMAC.
-pub(crate) fn encryption_key() -> &'static [u8; 32] {
-    &ENCRYPTION_KEY
-}
+/// Pre-initialized AES-256 cipher for encryption and decryption.
+static CIPHER: LazyLock<Aes256> = LazyLock::new(|| Aes256::new(ENCRYPTION_KEY.as_slice().into()));
+
+/// Pre-initialized HMAC-SHA256 state to avoid re-computing the key schedule.
+static HMAC_STATE: LazyLock<Hmac<Sha256>> = LazyLock::new(|| {
+    <Hmac<Sha256> as Mac>::new_from_slice(ENCRYPTION_KEY.as_slice())
+        .expect("HMAC can take key of any size")
+});
 
 /// Encrypts the given bytes using AES-256 in ECB mode with PKCS#7 padding.
 ///
 /// The input is padded to a 16-byte boundary and each block is encrypted in place; the returned
 /// [`Vec<u8>`] contains the ciphertext whose length is a multiple of 16 bytes.
 pub(crate) fn encrypt(data: &[u8]) -> Result<Vec<u8>> {
-    let key = encryption_key();
-    let cipher = Aes256::new(key.into());
-
     // Apply PKCS7 padding
     let block_size = 16;
     let padding_len = block_size - (data.len() % block_size);
-    let mut padded = data.to_vec();
-    padded.extend(vec![padding_len as u8; padding_len]);
+    let mut padded = Vec::with_capacity(data.len() + padding_len);
+    padded.extend_from_slice(data);
+    padded.resize(data.len() + padding_len, padding_len as u8);
 
-    // Encrypt each block
-    for chunk in padded.chunks_exact_mut(block_size) {
-        let block = Block::<Aes256>::from_mut_slice(chunk);
-        cipher.encrypt_block(block);
-    }
+    // Encrypt blocks in parallel (if supported by hardware)
+    // Safety: GenericArray/Block is repr(transparent) over [u8; 16]
+    let blocks = unsafe {
+        std::slice::from_raw_parts_mut(
+            padded.as_mut_ptr() as *mut Block<Aes256>,
+            padded.len() / block_size,
+        )
+    };
+    CIPHER.encrypt_blocks(blocks);
 
     Ok(padded)
 }
@@ -57,21 +60,22 @@ pub(crate) fn encrypt(data: &[u8]) -> Result<Vec<u8>> {
 ///
 /// Returns the decrypted plaintext on success. Returns an error if the input length is zero or not a multiple of 16, or if PKCS#7 padding is invalid.
 pub(crate) fn decrypt(data: &[u8]) -> Result<Vec<u8>> {
-    let key = encryption_key();
-    let cipher = Aes256::new(key.into());
-
     if data.is_empty() || data.len() % 16 != 0 {
         return Err(NethernetError::Other(
             "Invalid encrypted data length".to_string(),
         ));
     }
 
-    // Decrypt each block
+    // Decrypt blocks in parallel (if supported by hardware)
     let mut decrypted = data.to_vec();
-    for chunk in decrypted.chunks_exact_mut(16) {
-        let block = Block::<Aes256>::from_mut_slice(chunk);
-        cipher.decrypt_block(block);
-    }
+    // Safety: GenericArray/Block is repr(transparent) over [u8; 16]
+    let blocks = unsafe {
+        std::slice::from_raw_parts_mut(
+            decrypted.as_mut_ptr() as *mut Block<Aes256>,
+            decrypted.len() / 16,
+        )
+    };
+    CIPHER.decrypt_blocks(blocks);
 
     // Remove PKCS7 padding
     if let Some(&padding_len) = decrypted.last() {
@@ -99,14 +103,10 @@ pub(crate) fn decrypt(data: &[u8]) -> Result<Vec<u8>> {
 ///
 /// Returns a 32-byte HMAC-SHA256 value.
 pub(crate) fn compute_checksum(data: &[u8]) -> [u8; 32] {
-    let key = encryption_key();
-    let mut mac =
-        <Hmac<Sha256> as Mac>::new_from_slice(key).expect("HMAC can take key of any size");
+    let mut mac = HMAC_STATE.clone();
     mac.update(data);
     let result = mac.finalize();
-    let mut checksum = [0u8; 32];
-    checksum.copy_from_slice(&result.into_bytes());
-    checksum
+    result.into_bytes().into()
 }
 
 /// Verifies that `data` matches the given HMAC-SHA256 `expected` checksum using the module's encryption key.
@@ -115,9 +115,7 @@ pub(crate) fn compute_checksum(data: &[u8]) -> [u8; 32] {
 ///
 /// `true` if `expected` matches the HMAC-SHA256 of `data`, `false` otherwise.
 pub(crate) fn verify_checksum(data: &[u8], expected: &[u8; 32]) -> bool {
-    let key = encryption_key();
-    let mut mac =
-        <Hmac<Sha256> as Mac>::new_from_slice(key).expect("HMAC can take key of any size");
+    let mut mac = HMAC_STATE.clone();
     mac.update(data);
     mac.verify_slice(expected).is_ok()
 }
@@ -144,11 +142,4 @@ mod tests {
         assert!(!verify_checksum(data, &wrong_checksum));
     }
 
-    #[test]
-    fn test_encryption_key() {
-        // The key should be deterministic
-        let key1 = encryption_key();
-        let key2 = encryption_key();
-        assert_eq!(key1, key2);
-    }
 }

@@ -71,27 +71,32 @@ impl Header {
 ///
 /// A [`Vec<u8>`] containing the serialized packet: the 32-byte HMAC-SHA256 checksum followed by the AES-ECB encrypted payload.
 pub fn marshal(packet: &dyn Packet, sender_id: u64) -> Result<Vec<u8>> {
-    let mut buf = Vec::new();
+    // Discovery packets are generally small (header 18 bytes + length 2 bytes + packet data)
+    // Pre-allocating a reasonable default size to avoid multiple re-allocations.
+    let mut payload = Vec::with_capacity(128);
+    
+    // Placeholder for length (U16LE)
+    payload.extend_from_slice(&[0u8; 2]);
 
-    // Write header
+    // Write header directly into payload
     let header = Header {
         packet_id: packet.id(),
         sender_id,
     };
-    header.write(&mut buf)?;
+    header.write(&mut payload)?;
 
-    // Write packet data
-    packet.write(&mut buf)?;
+    // Write packet data directly into payload
+    packet.write(&mut payload)?;
 
-    // Prepend length
-    // Validate that buf.len() fits in u16 to prevent silent truncation
-    if buf.len() > u16::MAX as usize {
-        return Err(NethernetError::MessageTooLarge(buf.len()));
+    // Fill the actual length at the beginning
+    let total_len = payload.len();
+    if total_len > u16::MAX as usize {
+        return Err(NethernetError::MessageTooLarge(total_len));
     }
-    let length = buf.len() as u16;
-    let mut payload = Vec::new();
-    U16LE(length).write(&mut payload)?;
-    payload.extend_from_slice(&buf);
+    let data_len = (total_len - 2) as u16;
+    let len_bytes = data_len.to_le_bytes();
+    payload[0] = len_bytes[0];
+    payload[1] = len_bytes[1];
 
     // Encrypt the payload
     let encrypted = encrypt(&payload)?;
@@ -100,7 +105,7 @@ pub fn marshal(packet: &dyn Packet, sender_id: u64) -> Result<Vec<u8>> {
     let checksum = compute_checksum(&payload);
 
     // Combine checksum + encrypted data
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(32 + encrypted.len());
     result.extend_from_slice(&checksum);
     result.extend_from_slice(&encrypted);
 
