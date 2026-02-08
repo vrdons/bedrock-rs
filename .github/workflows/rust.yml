@@ -92,11 +92,11 @@ jobs:
 
       - name: Run benchmarks
         run: |
-          if [ -d "target/criterion/data" ]; then
-            cargo bench --all-targets -- --save-baseline after
+          if [ -d "target/criterion" ] && critcmp --baselines 2>/dev/null | grep -q '^master$'; then
+            cargo bench --benches -- --save-baseline after
             critcmp -t 5 master after
           else
-            cargo bench --all-targets -- --save-baseline master
+            cargo bench --benches -- --save-baseline master
           fi
 
       - name: Update baseline cache
