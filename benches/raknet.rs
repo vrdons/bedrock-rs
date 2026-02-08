@@ -47,7 +47,7 @@ fn create_test_encapsulated_packet(size: usize) -> EncapsulatedPacket {
             is_split: false,
             needs_bas: false,
         },
-        bit_length: (size * 8) as u16,
+        bit_length: u16::try_from(size * 8).expect("payload too large for bit_length u16"),
         reliable_index: Some(Sequence24::new(0)),
         sequence_index: None,
         ordering_index: Some(Sequence24::new(0)),
@@ -613,25 +613,27 @@ fn bench_buffer_allocation(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(
-    benches,
-    bench_datagram_encode,
-    bench_datagram_decode,
-    bench_datagram_roundtrip,
-    bench_encapsulated_packet_encode,
-    bench_encapsulated_packet_decode,
-    bench_encapsulated_packet_roundtrip,
-    bench_split_packet_encode,
-    bench_split_packet_decode,
-    bench_split_packet_roundtrip,
-    bench_unconnected_packets,
-    bench_ack_payload_encode,
-    bench_ack_payload_decode,
-    bench_ack_payload_roundtrip,
-    bench_sequence24_operations,
-    bench_reliability_checks,
-    bench_sequence_range_operations,
-    bench_buffer_allocation
-);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().sample_size(500);
+    targets =
+        bench_datagram_encode,
+        bench_datagram_decode,
+        bench_datagram_roundtrip,
+        bench_encapsulated_packet_encode,
+        bench_encapsulated_packet_decode,
+        bench_encapsulated_packet_roundtrip,
+        bench_split_packet_encode,
+        bench_split_packet_decode,
+        bench_split_packet_roundtrip,
+        bench_unconnected_packets,
+        bench_ack_payload_encode,
+        bench_ack_payload_decode,
+        bench_ack_payload_roundtrip,
+        bench_sequence24_operations,
+        bench_reliability_checks,
+        bench_sequence_range_operations,
+        bench_buffer_allocation
+}
 
 criterion_main!(benches);

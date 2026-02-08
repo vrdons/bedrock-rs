@@ -242,14 +242,16 @@ fn bench_discovery_roundtrip(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(
-    benches,
-    bench_message_encode,
-    bench_message_decode,
-    bench_message_segmentation,
-    bench_discovery_marshal,
-    bench_discovery_unmarshal,
-    bench_discovery_roundtrip
-);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().sample_size(500);
+    targets =
+        bench_message_encode,
+        bench_message_decode,
+        bench_message_segmentation,
+        bench_discovery_marshal,
+        bench_discovery_unmarshal,
+        bench_discovery_roundtrip
+}
 
 criterion_main!(benches);
