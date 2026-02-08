@@ -399,7 +399,7 @@ fn bench_ack_payload(c: &mut Criterion) {
         let encoded = buf.freeze();
 
         group.bench_with_input(
-            BenchmarkId::from_parameter(count),
+            BenchmarkId::new("encode", count),
             &payload,
             |b, payload| {
                 b.iter(|| {
