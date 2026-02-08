@@ -151,14 +151,10 @@ fn bench_discovery_unmarshal(c: &mut Criterion) {
 
         let marshaled = marshal(&packet, SENDER_ID).unwrap();
 
-        b.iter_batched(
-            || marshaled.clone(),
-            |data| {
-                let (pkt, _) = unmarshal(black_box(&data)).unwrap();
-                black_box(pkt);
-            },
-            BatchSize::SmallInput,
-        );
+        b.iter(|| {
+            let (pkt, _) = unmarshal(black_box(&marshaled)).unwrap();
+            black_box(pkt);
+        });
     });
 
     // Response packets
