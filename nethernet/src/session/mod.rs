@@ -55,7 +55,7 @@ impl Session {
 
             Box::pin(async move {
                 let data_len = data.len();
-                match MessageSegment::decode(data.as_ref()) {
+                match MessageSegment::decode(data.clone()) {
                     Ok(segment) => {
                         let result = {
                             let mut buf = buffer.lock().await;

@@ -74,7 +74,7 @@ pub fn marshal(packet: &dyn Packet, sender_id: u64) -> Result<Vec<u8>> {
     // Discovery packets are generally small (header 18 bytes + length 2 bytes + packet data)
     // Pre-allocating a reasonable default size to avoid multiple re-allocations.
     let mut payload = Vec::with_capacity(128);
-    
+
     // Placeholder for length (U16LE)
     payload.extend_from_slice(&[0u8; 2]);
 
@@ -93,10 +93,9 @@ pub fn marshal(packet: &dyn Packet, sender_id: u64) -> Result<Vec<u8>> {
     if total_len > u16::MAX as usize {
         return Err(NethernetError::MessageTooLarge(total_len));
     }
+
     let data_len = (total_len - 2) as u16;
-    let len_bytes = data_len.to_le_bytes();
-    payload[0] = len_bytes[0];
-    payload[1] = len_bytes[1];
+    payload[..2].copy_from_slice(&data_len.to_le_bytes());
 
     // Encrypt the payload
     let encrypted = encrypt(&payload)?;
@@ -130,10 +129,9 @@ pub fn unmarshal(data: &[u8]) -> Result<(Box<dyn Packet>, u64)> {
 
     // Extract checksum and encrypted payload
     let checksum: [u8; 32] = data[..32].try_into().unwrap();
-    let encrypted = &data[32..];
-
-    // Decrypt the payload
-    let payload = decrypt(encrypted)?;
+    
+    // Decrypt directly into a new Vec
+    let payload = decrypt(&data[32..])?;
 
     // Verify checksum
     if !verify_checksum(&payload, &checksum) {
@@ -142,7 +140,7 @@ pub fn unmarshal(data: &[u8]) -> Result<(Box<dyn Packet>, u64)> {
 
     let mut cursor = Cursor::new(payload);
 
-    // Read length (2 bytes) - this was missing!
+    // Read length (2 bytes)
     let _length = U16LE::read(&mut cursor)?;
 
     // Read header

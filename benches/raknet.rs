@@ -1,5 +1,7 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{
+    criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput,
+};
 use raknet::protocol::{
     ack::{AckNackPayload, SequenceRange},
     constants::{DEFAULT_UNCONNECTED_MAGIC, DatagramFlags},
@@ -10,12 +12,12 @@ use raknet::protocol::{
     types::{Advertisement, DatagramHeader, EncapsulatedPacketHeader, RaknetTime, Sequence24},
 };
 use std::hint::black_box;
+use std::time::Duration;
 
-// Helper builders used by multiple benchmarks
+
 fn create_test_datagram(packet_count: usize) -> Datagram {
-    let mut packets = Vec::new();
-    for i in 0..packet_count {
-        packets.push(EncapsulatedPacket {
+    let packets = (0..packet_count)
+        .map(|i| EncapsulatedPacket {
             header: EncapsulatedPacketHeader {
                 reliability: Reliability::ReliableOrdered,
                 is_split: false,
@@ -28,8 +30,8 @@ fn create_test_datagram(packet_count: usize) -> Datagram {
             ordering_channel: Some(0),
             split: None,
             payload: Bytes::from(vec![0u8; 64]),
-        });
-    }
+        })
+        .collect();
 
     Datagram {
         header: DatagramHeader {
@@ -47,7 +49,7 @@ fn create_test_encapsulated_packet(size: usize) -> EncapsulatedPacket {
             is_split: false,
             needs_bas: false,
         },
-        bit_length: u16::try_from(size * 8).expect("payload too large for bit_length u16"),
+        bit_length: (size * 8) as u16,
         reliable_index: Some(Sequence24::new(0)),
         sequence_index: None,
         ordering_index: Some(Sequence24::new(0)),
@@ -55,17 +57,6 @@ fn create_test_encapsulated_packet(size: usize) -> EncapsulatedPacket {
         split: None,
         payload: Bytes::from(vec![0u8; size]),
     }
-}
-
-fn create_test_ack_payload(range_count: usize) -> AckNackPayload {
-    let mut ranges = Vec::new();
-    for i in 0..range_count {
-        ranges.push(SequenceRange {
-            start: Sequence24::new(i as u32 * 10),
-            end: Sequence24::new(i as u32 * 10 + 5),
-        });
-    }
-    AckNackPayload { ranges }
 }
 
 fn create_test_split_packet() -> EncapsulatedPacket {
@@ -89,22 +80,32 @@ fn create_test_split_packet() -> EncapsulatedPacket {
     }
 }
 
-// Datagram encoding/decoding benchmarks
+fn create_test_ack_payload(range_count: usize) -> AckNackPayload {
+    let ranges = (0..range_count)
+        .map(|i| SequenceRange {
+            start: Sequence24::new(i as u32 * 10),
+            end: Sequence24::new(i as u32 * 10 + 5),
+        })
+        .collect();
+
+    AckNackPayload { ranges }
+}
+
 fn bench_datagram_encode(c: &mut Criterion) {
     let mut group = c.benchmark_group("datagram_encode");
 
-    for packet_count in [1, 4, 8, 16].iter() {
-        let datagram = create_test_datagram(*packet_count);
-        let mut buf = BytesMut::with_capacity(1400);
-        datagram.encode(&mut buf).unwrap();
-        group.throughput(Throughput::Bytes(buf.len() as u64));
+    for count in [1, 4, 8, 16] {
+        let datagram = create_test_datagram(count);
+
+        let mut tmp = BytesMut::with_capacity(1400);
+        datagram.encode(&mut tmp).unwrap();
+
+        group.throughput(Throughput::Bytes(tmp.len() as u64));
 
         group.bench_with_input(
-            BenchmarkId::from_parameter(packet_count),
-            packet_count,
-            |b, &count| {
-                let datagram = create_test_datagram(count);
-
+            BenchmarkId::from_parameter(count),
+            &datagram,
+            |b, datagram| {
                 b.iter(|| {
                     let mut buf = BytesMut::with_capacity(1400);
                     datagram.encode(black_box(&mut buf)).unwrap();
@@ -113,192 +114,221 @@ fn bench_datagram_encode(c: &mut Criterion) {
             },
         );
     }
+
     group.finish();
 }
 
 fn bench_datagram_decode(c: &mut Criterion) {
     let mut group = c.benchmark_group("datagram_decode");
 
-    for packet_count in [1, 4, 8, 16].iter() {
-        let datagram = create_test_datagram(*packet_count);
+    for count in [1, 4, 8, 16] {
+        let datagram = create_test_datagram(count);
+
         let mut buf = BytesMut::with_capacity(1400);
         datagram.encode(&mut buf).unwrap();
-        group.throughput(Throughput::Bytes(buf.len() as u64));
+
+        let encoded = buf.freeze();
+
+        group.throughput(Throughput::Bytes(encoded.len() as u64));
 
         group.bench_with_input(
-            BenchmarkId::from_parameter(packet_count),
-            packet_count,
-            |b, &count| {
-                let datagram = create_test_datagram(count);
-
-                let mut buf = BytesMut::with_capacity(1400);
-                datagram.encode(&mut buf).unwrap();
-                let encoded = buf.freeze();
-
-                b.iter(|| {
-                    let mut data = black_box(encoded.clone());
-                    let decoded = Datagram::decode(black_box(&mut data)).unwrap();
-                    black_box(decoded);
-                });
+            BenchmarkId::from_parameter(count),
+            &encoded,
+            |b, encoded| {
+                b.iter_batched(
+                    || encoded.clone(),
+                    |data| {
+                        let mut d = data;
+                        let pkt = Datagram::decode(black_box(&mut d)).unwrap();
+                        black_box(pkt);
+                    },
+                    BatchSize::SmallInput,
+                );
             },
         );
     }
+
     group.finish();
 }
 
-// Datagram round-trip benchmarks (encode + decode)
 fn bench_datagram_roundtrip(c: &mut Criterion) {
     let mut group = c.benchmark_group("datagram_roundtrip");
 
-    for packet_count in [1, 4, 8, 16].iter() {
-        let datagram = create_test_datagram(*packet_count);
-        let mut buf = BytesMut::with_capacity(1400);
-        datagram.encode(&mut buf).unwrap();
-        group.throughput(Throughput::Bytes(buf.len() as u64));
+    for count in [1, 4, 8, 16] {
+        let datagram = create_test_datagram(count);
+
+        let mut tmp = BytesMut::with_capacity(1400);
+        datagram.encode(&mut tmp).unwrap();
+
+        group.throughput(Throughput::Bytes(tmp.len() as u64));
 
         group.bench_with_input(
-            BenchmarkId::from_parameter(packet_count),
-            packet_count,
-            |b, &count| {
-                let datagram = create_test_datagram(count);
-
+            BenchmarkId::from_parameter(count),
+            &datagram,
+            |b, datagram| {
                 b.iter(|| {
                     let mut buf = BytesMut::with_capacity(1400);
                     datagram.encode(black_box(&mut buf)).unwrap();
-                    let encoded = buf.freeze();
-                    let mut data = encoded;
-                    let decoded = Datagram::decode(&mut data).unwrap();
-                    black_box(decoded);
+
+                    let mut data = buf.freeze();
+
+                    let pkt = Datagram::decode(&mut data).unwrap();
+                    black_box(pkt);
                 });
             },
         );
     }
+
     group.finish();
 }
 
-// EncapsulatedPacket encoding/decoding benchmarks
+
 fn bench_encapsulated_packet_encode(c: &mut Criterion) {
     let mut group = c.benchmark_group("encapsulated_packet_encode");
 
-    for size in [64, 256, 512, 1024, 2048].iter() {
-        group.throughput(Throughput::Bytes(*size as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
-            let packet = create_test_encapsulated_packet(size);
+    for size in [64, 256, 512, 1024, 2048] {
+        let packet = create_test_encapsulated_packet(size);
 
-            b.iter(|| {
-                let mut buf = BytesMut::with_capacity(size + 64);
-                packet.encode_raknet(black_box(&mut buf)).unwrap();
-                black_box(buf);
-            });
-        });
+        group.throughput(Throughput::Bytes(size as u64));
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(size),
+            &packet,
+            |b, packet| {
+                b.iter(|| {
+                    let mut buf = BytesMut::with_capacity(size + 64);
+                    packet.encode_raknet(black_box(&mut buf)).unwrap();
+                    black_box(buf);
+                });
+            },
+        );
     }
+
     group.finish();
 }
 
 fn bench_encapsulated_packet_decode(c: &mut Criterion) {
     let mut group = c.benchmark_group("encapsulated_packet_decode");
 
-    for size in [64, 256, 512, 1024, 2048].iter() {
-        group.throughput(Throughput::Bytes(*size as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
-            let packet = create_test_encapsulated_packet(size);
+    for size in [64, 256, 512, 1024, 2048] {
+        let packet = create_test_encapsulated_packet(size);
 
-            let mut buf = BytesMut::with_capacity(size + 64);
-            packet.encode_raknet(&mut buf).unwrap();
-            let encoded = buf.freeze();
+        let mut buf = BytesMut::with_capacity(size + 64);
+        packet.encode_raknet(&mut buf).unwrap();
 
-            b.iter(|| {
-                let mut data = black_box(encoded.clone());
-                let decoded = EncapsulatedPacket::decode_raknet(black_box(&mut data)).unwrap();
-                black_box(decoded);
-            });
-        });
+        let encoded = buf.freeze();
+
+        group.throughput(Throughput::Bytes(encoded.len() as u64));
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(size),
+            &encoded,
+            |b, encoded| {
+                b.iter_batched(
+                    || encoded.clone(),
+                    |data| {
+                        let mut d = data;
+                        let pkt = EncapsulatedPacket::decode_raknet(
+                            black_box(&mut d),
+                        )
+                        .unwrap();
+
+                        black_box(pkt);
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
     }
+
     group.finish();
 }
 
-// EncapsulatedPacket round-trip benchmarks
 fn bench_encapsulated_packet_roundtrip(c: &mut Criterion) {
     let mut group = c.benchmark_group("encapsulated_packet_roundtrip");
 
-    for size in [64, 256, 512, 1024, 2048].iter() {
-        group.throughput(Throughput::Bytes(*size as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
-            let packet = create_test_encapsulated_packet(size);
+    for size in [64, 256, 512, 1024, 2048] {
+        let packet = create_test_encapsulated_packet(size);
 
-            b.iter(|| {
-                let mut buf = BytesMut::with_capacity(size + 64);
-                packet.encode_raknet(black_box(&mut buf)).unwrap();
-                let encoded = buf.freeze();
-                let mut data = encoded;
-                let decoded = EncapsulatedPacket::decode_raknet(&mut data).unwrap();
-                black_box(decoded);
-            });
-        });
+        group.throughput(Throughput::Bytes(size as u64));
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(size),
+            &packet,
+            |b, packet| {
+                b.iter(|| {
+                    let mut buf = BytesMut::with_capacity(size + 64);
+
+                    packet.encode_raknet(black_box(&mut buf)).unwrap();
+
+                    let mut data = buf.freeze();
+
+                    let pkt =
+                        EncapsulatedPacket::decode_raknet(&mut data).unwrap();
+
+                    black_box(pkt);
+                });
+            },
+        );
     }
+
     group.finish();
 }
 
-// Split packet benchmarks
-fn bench_split_packet_encode(c: &mut Criterion) {
-    let mut group = c.benchmark_group("split_packet_encode");
 
-    group.bench_function("with_split_info", |b| {
-        let packet = create_test_split_packet();
+fn bench_split_packet(c: &mut Criterion) {
+    let mut group = c.benchmark_group("split_packet");
 
+    let packet = create_test_split_packet();
+
+    let mut buf = BytesMut::with_capacity(128);
+    packet.encode_raknet(&mut buf).unwrap();
+
+    let encoded = buf.freeze();
+
+    group.bench_function("encode", |b| {
         b.iter(|| {
-            let mut buf = BytesMut::with_capacity(128);
-            packet.encode_raknet(black_box(&mut buf)).unwrap();
-            black_box(buf);
+            let mut b2 = BytesMut::with_capacity(128);
+            packet.encode_raknet(black_box(&mut b2)).unwrap();
+            black_box(b2);
+        });
+    });
+
+    group.bench_function("decode", |b| {
+        b.iter_batched(
+            || encoded.clone(),
+            |data| {
+                let mut d = data;
+                let pkt =
+                    EncapsulatedPacket::decode_raknet(black_box(&mut d))
+                        .unwrap();
+
+                black_box(pkt);
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    group.bench_function("roundtrip", |b| {
+        b.iter(|| {
+            let mut b2 = BytesMut::with_capacity(128);
+
+            packet.encode_raknet(black_box(&mut b2)).unwrap();
+
+            let mut d = b2.freeze();
+
+            let pkt = EncapsulatedPacket::decode_raknet(&mut d).unwrap();
+
+            black_box(pkt);
         });
     });
 
     group.finish();
 }
 
-fn bench_split_packet_decode(c: &mut Criterion) {
-    let mut group = c.benchmark_group("split_packet_decode");
-
-    group.bench_function("with_split_info", |b| {
-        let packet = create_test_split_packet();
-
-        let mut buf = BytesMut::with_capacity(128);
-        packet.encode_raknet(&mut buf).unwrap();
-        let encoded = buf.freeze();
-
-        b.iter(|| {
-            let mut data = black_box(encoded.clone());
-            let decoded = EncapsulatedPacket::decode_raknet(black_box(&mut data)).unwrap();
-            black_box(decoded);
-        });
-    });
-
-    group.finish();
-}
-
-fn bench_split_packet_roundtrip(c: &mut Criterion) {
-    let mut group = c.benchmark_group("split_packet_roundtrip");
-
-    group.bench_function("with_split_info", |b| {
-        let packet = create_test_split_packet();
-
-        b.iter(|| {
-            let mut buf = BytesMut::with_capacity(128);
-            packet.encode_raknet(black_box(&mut buf)).unwrap();
-            let encoded = buf.freeze();
-            let mut data = encoded;
-            let decoded = EncapsulatedPacket::decode_raknet(&mut data).unwrap();
-            black_box(decoded);
-        });
-    });
-
-    group.finish();
-}
-
-// Unconnected packet benchmarks (ping/pong discovery)
 fn bench_unconnected_packets(c: &mut Criterion) {
     let mut group = c.benchmark_group("unconnected_packets");
-    // Shared ping/pong values and pre-encoded buffers for decode benches
+
     let ping = UnconnectedPing {
         ping_time: RaknetTime(1000),
         magic: DEFAULT_UNCONNECTED_MAGIC,
@@ -307,201 +337,182 @@ fn bench_unconnected_packets(c: &mut Criterion) {
     let mut ping_buf = BytesMut::with_capacity(32);
     ping_buf.put_u8(UnconnectedPing::ID);
     ping.encode_body(&mut ping_buf).unwrap();
+
     let encoded_ping = ping_buf.freeze();
 
-    let ad_data =
-        Bytes::from("MCPE;Test Server;390;1.14.60;0;20;12345;World;Survival;1;19132;19133;");
+    let ad = Bytes::from(
+        "MCPE;Test Server;390;1.14.60;0;20;12345;World;Survival;1;19132;19133;",
+    );
+
     let pong = UnconnectedPong {
         ping_time: RaknetTime(1000),
         server_guid: 0x1234567890abcdef,
         magic: DEFAULT_UNCONNECTED_MAGIC,
-        advertisement: Advertisement(Some(ad_data.clone())),
+        advertisement: Advertisement(Some(ad)),
     };
 
     let mut pong_buf = BytesMut::with_capacity(256);
     pong_buf.put_u8(UnconnectedPong::ID);
     pong.encode_body(&mut pong_buf).unwrap();
+
     let encoded_pong = pong_buf.freeze();
 
-    // UnconnectedPing encode
     group.bench_function("ping_encode", |b| {
         b.iter(|| {
             let mut buf = BytesMut::with_capacity(32);
+
             buf.put_u8(UnconnectedPing::ID);
+
             ping.encode_body(black_box(&mut buf)).unwrap();
+
             black_box(buf);
         });
     });
 
-    // UnconnectedPing decode
     group.bench_function("ping_decode", |b| {
-        b.iter(|| {
-            let mut data = black_box(encoded_ping.clone());
-            data.get_u8(); // Skip ID
-            let decoded = UnconnectedPing::decode_body(black_box(&mut data)).unwrap();
-            black_box(decoded);
-        });
+        b.iter_batched(
+            || encoded_ping.clone(),
+            |mut data| {
+                data.get_u8();
+
+                let pkt =
+                    UnconnectedPing::decode_body(black_box(&mut data))
+                        .unwrap();
+
+                black_box(pkt);
+            },
+            BatchSize::SmallInput,
+        );
     });
 
-    // UnconnectedPong encode
     group.bench_function("pong_encode", |b| {
         b.iter(|| {
             let mut buf = BytesMut::with_capacity(256);
+
             buf.put_u8(UnconnectedPong::ID);
+
             pong.encode_body(black_box(&mut buf)).unwrap();
+
             black_box(buf);
         });
     });
 
-    // UnconnectedPong decode
     group.bench_function("pong_decode", |b| {
-        b.iter(|| {
-            let mut data = black_box(encoded_pong.clone());
-            data.get_u8(); // Skip ID
-            let decoded = UnconnectedPong::decode_body(black_box(&mut data)).unwrap();
-            black_box(decoded);
-        });
-    });
+        b.iter_batched(
+            || encoded_pong.clone(),
+            |mut data| {
+                data.get_u8();
 
-    // Ping/Pong round-trip
-    group.bench_function("ping_roundtrip", |b| {
-        b.iter(|| {
-            // Encode ping
-            let mut buf = BytesMut::with_capacity(32);
-            buf.put_u8(UnconnectedPing::ID);
-            ping.encode_body(black_box(&mut buf)).unwrap();
-            let encoded = buf.freeze();
+                let pkt =
+                    UnconnectedPong::decode_body(black_box(&mut data))
+                        .unwrap();
 
-            // Decode ping
-            let mut data = encoded;
-            data.get_u8();
-            let decoded = UnconnectedPing::decode_body(&mut data).unwrap();
-            black_box(decoded);
-        });
+                black_box(pkt);
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     group.finish();
 }
 
-// ACK/NACK payload benchmarks
-fn bench_ack_payload_encode(c: &mut Criterion) {
-    let mut group = c.benchmark_group("ack_payload_encode");
 
-    for range_count in [1, 5, 10, 20, 50].iter() {
+fn bench_ack_payload(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ack_payload");
+
+    for count in [1, 5, 10, 20, 50] {
+        let payload = create_test_ack_payload(count);
+
+        let mut buf = BytesMut::with_capacity(256);
+        payload.encode_raknet(&mut buf).unwrap();
+
+        let encoded = buf.freeze();
+
         group.bench_with_input(
-            BenchmarkId::from_parameter(range_count),
-            range_count,
-            |b, &count| {
-                let payload = create_test_ack_payload(count);
-
+            BenchmarkId::from_parameter(count),
+            &payload,
+            |b, payload| {
                 b.iter(|| {
-                    let mut buf = BytesMut::with_capacity(256);
-                    payload.encode_raknet(black_box(&mut buf)).unwrap();
-                    black_box(buf);
+                    let mut b2 = BytesMut::with_capacity(256);
+
+                    payload
+                        .encode_raknet(black_box(&mut b2))
+                        .unwrap();
+
+                    black_box(b2);
                 });
             },
         );
-    }
-    group.finish();
-}
 
-fn bench_ack_payload_decode(c: &mut Criterion) {
-    let mut group = c.benchmark_group("ack_payload_decode");
-
-    for range_count in [1, 5, 10, 20, 50].iter() {
         group.bench_with_input(
-            BenchmarkId::from_parameter(range_count),
-            range_count,
-            |b, &count| {
-                let payload = create_test_ack_payload(count);
-                let mut buf = BytesMut::with_capacity(256);
-                payload.encode_raknet(&mut buf).unwrap();
-                let encoded = buf.freeze();
+            BenchmarkId::new("decode", count),
+            &encoded,
+            |b, encoded| {
+                b.iter_batched(
+                    || encoded.clone(),
+                    |data| {
+                        let mut d = data;
 
-                b.iter(|| {
-                    let mut data = black_box(encoded.clone());
-                    let decoded = AckNackPayload::decode_raknet(black_box(&mut data)).unwrap();
-                    black_box(decoded);
-                });
+                        let pkt =
+                            AckNackPayload::decode_raknet(
+                                black_box(&mut d),
+                            )
+                            .unwrap();
+
+                        black_box(pkt);
+                    },
+                    BatchSize::SmallInput,
+                );
             },
         );
     }
+
     group.finish();
 }
 
-// ACK/NACK round-trip benchmarks
-fn bench_ack_payload_roundtrip(c: &mut Criterion) {
-    let mut group = c.benchmark_group("ack_payload_roundtrip");
+fn bench_sequence24(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sequence24");
 
-    for range_count in [1, 5, 10, 20, 50].iter() {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(range_count),
-            range_count,
-            |b, &count| {
-                let payload = create_test_ack_payload(count);
+    let seq = Sequence24::new(0x123456);
 
-                b.iter(|| {
-                    let mut buf = BytesMut::with_capacity(256);
-                    payload.encode_raknet(black_box(&mut buf)).unwrap();
-                    let encoded = buf.freeze();
-                    let mut data = encoded;
-                    let decoded = AckNackPayload::decode_raknet(&mut data).unwrap();
-                    black_box(decoded);
-                });
-            },
-        );
-    }
-    group.finish();
-}
+    let mut buf = BytesMut::with_capacity(3);
+    seq.encode_raknet(&mut buf).unwrap();
 
-// Sequence24 operations benchmarks
-fn bench_sequence24_operations(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sequence24_operations");
+    let encoded = buf.freeze();
 
     group.bench_function("encode", |b| {
-        let seq = Sequence24::new(0x123456);
-
         b.iter(|| {
-            let mut buf = BytesMut::with_capacity(3);
-            seq.encode_raknet(black_box(&mut buf)).unwrap();
-            black_box(buf);
+            let mut b2 = BytesMut::with_capacity(3);
+
+            seq.encode_raknet(black_box(&mut b2)).unwrap();
+
+            black_box(b2);
         });
     });
 
     group.bench_function("decode", |b| {
-        let seq = Sequence24::new(0x123456);
-        let mut buf = BytesMut::with_capacity(3);
-        seq.encode_raknet(&mut buf).unwrap();
-        let encoded = buf.freeze();
+        b.iter_batched(
+            || encoded.clone(),
+            |data| {
+                let mut d = data;
 
-        b.iter(|| {
-            let mut data = black_box(encoded.clone());
-            let decoded = Sequence24::decode_raknet(black_box(&mut data)).unwrap();
-            black_box(decoded);
-        });
-    });
+                let v =
+                    Sequence24::decode_raknet(black_box(&mut d))
+                        .unwrap();
 
-    group.bench_function("roundtrip", |b| {
-        let seq = Sequence24::new(0x123456);
-
-        b.iter(|| {
-            let mut buf = BytesMut::with_capacity(3);
-            seq.encode_raknet(black_box(&mut buf)).unwrap();
-            let encoded = buf.freeze();
-            let mut data = encoded;
-            let decoded = Sequence24::decode_raknet(&mut data).unwrap();
-            black_box(decoded);
-        });
+                black_box(v);
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     group.finish();
 }
 
-// Reliability type benchmarks
-fn bench_reliability_checks(c: &mut Criterion) {
-    let mut group = c.benchmark_group("reliability_checks");
+fn bench_reliability(c: &mut Criterion) {
+    let mut group = c.benchmark_group("reliability");
 
-    let reliabilities = [
+    let rels = [
         Reliability::Unreliable,
         Reliability::UnreliableSequenced,
         Reliability::Reliable,
@@ -509,29 +520,23 @@ fn bench_reliability_checks(c: &mut Criterion) {
         Reliability::ReliableSequenced,
     ];
 
-    for reliability in reliabilities.iter() {
+    for rel in rels {
         group.bench_with_input(
-            BenchmarkId::new("is_reliable", format!("{:?}", reliability)),
-            reliability,
-            |b, &rel| {
+            BenchmarkId::new("is_reliable", format!("{:?}", rel)),
+            &rel,
+            |b, rel| {
                 b.iter(|| {
-                    for _ in 0..1000 {
-                        let result = black_box(rel).is_reliable();
-                        black_box(result);
-                    }
+                    black_box(rel).is_reliable();
                 });
             },
         );
 
         group.bench_with_input(
-            BenchmarkId::new("is_ordered", format!("{:?}", reliability)),
-            reliability,
-            |b, &rel| {
+            BenchmarkId::new("is_ordered", format!("{:?}", rel)),
+            &rel,
+            |b, rel| {
                 b.iter(|| {
-                    for _ in 0..1000 {
-                        let result = black_box(rel).is_ordered();
-                        black_box(result);
-                    }
+                    black_box(rel).is_ordered();
                 });
             },
         );
@@ -540,82 +545,34 @@ fn bench_reliability_checks(c: &mut Criterion) {
     group.finish();
 }
 
-// SequenceRange operations benchmarks
-fn bench_sequence_range_operations(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sequence_range_operations");
-
-    group.bench_function("non_wrapping_encode", |b| {
-        let range = SequenceRange {
-            start: Sequence24::new(100),
-            end: Sequence24::new(200),
-        };
-
-        b.iter(|| {
-            let mut buf = BytesMut::with_capacity(16);
-            range.encode_raknet(black_box(&mut buf)).unwrap();
-            black_box(buf);
-        });
-    });
-
-    group.bench_function("wrapping_encode", |b| {
-        let range = SequenceRange {
-            start: Sequence24::new(0x00FF_FFFE),
-            end: Sequence24::new(2),
-        };
-
-        b.iter(|| {
-            let mut buf = BytesMut::with_capacity(32);
-            range.encode_raknet(black_box(&mut buf)).unwrap();
-            black_box(buf);
-        });
-    });
-
-    group.bench_function("wrapping_check", |b| {
-        let range = SequenceRange {
-            start: Sequence24::new(0x00FF_FFFE),
-            end: Sequence24::new(2),
-        };
-
-        b.iter(|| {
-            let result = black_box(range).wraps();
-            black_box(result);
-        });
-    });
-
-    group.bench_function("split_wrapping", |b| {
-        let range = SequenceRange {
-            start: Sequence24::new(0x00FF_FFFE),
-            end: Sequence24::new(2),
-        };
-
-        b.iter(|| {
-            let result = black_box(range).split_wrapping();
-            black_box(result);
-        });
-    });
-
-    group.finish();
-}
-
-// Buffer allocation benchmarks
 fn bench_buffer_allocation(c: &mut Criterion) {
     let mut group = c.benchmark_group("buffer_allocation");
 
-    for size in [256, 512, 1024, 1400, 2048].iter() {
-        group.throughput(Throughput::Bytes(*size as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
-            b.iter(|| {
-                let buf = BytesMut::with_capacity(black_box(size));
-                black_box(buf);
-            });
-        });
+    for size in [256, 512, 1024, 1400, 2048] {
+        group.throughput(Throughput::Bytes(size as u64));
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(size),
+            &size,
+            |b, &size| {
+                b.iter(|| {
+                    let buf =
+                        BytesMut::with_capacity(black_box(size));
+
+                    black_box(buf);
+                });
+            },
+        );
     }
+
     group.finish();
 }
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().sample_size(500);
+    config = Criterion::default()
+        .sample_size(150)
+        .warm_up_time(Duration::from_secs(3));
     targets =
         bench_datagram_encode,
         bench_datagram_decode,
@@ -623,16 +580,11 @@ criterion_group! {
         bench_encapsulated_packet_encode,
         bench_encapsulated_packet_decode,
         bench_encapsulated_packet_roundtrip,
-        bench_split_packet_encode,
-        bench_split_packet_decode,
-        bench_split_packet_roundtrip,
+        bench_split_packet,
         bench_unconnected_packets,
-        bench_ack_payload_encode,
-        bench_ack_payload_decode,
-        bench_ack_payload_roundtrip,
-        bench_sequence24_operations,
-        bench_reliability_checks,
-        bench_sequence_range_operations,
+        bench_ack_payload,
+        bench_sequence24,
+        bench_reliability,
         bench_buffer_allocation
 }
 

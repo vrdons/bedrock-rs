@@ -68,6 +68,7 @@ jobs:
         with:
           prefix-key: bench
           shared-key: stable
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Cache critcmp
         uses: actions/cache@v4

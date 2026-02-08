@@ -33,7 +33,7 @@ static HMAC_STATE: LazyLock<Hmac<Sha256>> = LazyLock::new(|| {
 
 /// Encrypts the given bytes using AES-256 in ECB mode with PKCS#7 padding.
 ///
-/// The input is padded to a 16-byte boundary and each block is encrypted in place; the returned
+/// The input is padded to a 16-byte boundary and each block is encrypted; the returned
 /// [`Vec<u8>`] contains the ciphertext whose length is a multiple of 16 bytes.
 pub(crate) fn encrypt(data: &[u8]) -> Result<Vec<u8>> {
     // Apply PKCS7 padding

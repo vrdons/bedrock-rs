@@ -1,6 +1,6 @@
 use crate::error::{NethernetError, Result};
 use crate::protocol::constants::MAX_MESSAGE_SIZE;
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Message segment
 /// First byte contains segment count, remainder contains data
@@ -25,22 +25,25 @@ impl MessageSegment {
     pub fn encode(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(1 + self.data.len());
         buf.put_u8(self.remaining_segments);
-        buf.put(self.data.clone());
+        buf.extend_from_slice(&self.data);
         buf.freeze()
     }
 
-    /// Decode a MessageSegment from a byte slice.
-    pub fn decode(data: &[u8]) -> Result<Self> {
-        if data.len() < 2 {
+    /// Decode a MessageSegment from bytes.
+    ///
+    /// This is zero-copy as the input `Bytes` is used for the payload.
+    pub fn decode(mut data: Bytes) -> Result<Self> {
+        if data.is_empty() {
             return Err(NethernetError::MessageParse(
-                "Message too short, expected at least 2 bytes".to_string(),
+                "Message too short, expected at least 1 byte".to_string(),
             ));
         }
 
         let remaining_segments = data[0];
+        data.advance(1);
         Ok(Self {
             remaining_segments,
-            data: Bytes::copy_from_slice(&data[1..]),
+            data,
         })
     }
 }
@@ -219,5 +222,22 @@ mod tests {
         } else {
             panic!("Expected MessageParse error for out-of-order segment");
         }
+    }
+
+    #[test]
+    fn test_memory_efficient_allocation() {
+        // Create 10 segments of 100 bytes each
+        let segment_data = Bytes::from(vec![0u8; 100]);
+        let mut message = Message::new();
+        
+        // Add the first segment with remaining_segments = 9
+        let segment = MessageSegment::new(9, segment_data.clone());
+        message.add_segment(segment).unwrap();
+        
+        // Capacity should be at least 10 * 100 = 1000
+        // and significantly less than 10 * MAX_MESSAGE_SIZE (100,000)
+        let capacity = message.data.capacity();
+        assert!(capacity >= 1000, "Capacity {} too small", capacity);
+        assert!(capacity < 50000, "Capacity {} too large (over-allocation)", capacity);
     }
 }
