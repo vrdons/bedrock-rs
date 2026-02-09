@@ -31,6 +31,9 @@ criterion = "0.8.2"
 bytes = { workspace = true }
 
 
+[lib]
+bench = false
+
 [dependencies]
 raknet = { path = "./raknet" }
 nethernet = { path = "./nethernet" }

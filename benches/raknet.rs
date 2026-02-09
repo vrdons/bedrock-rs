@@ -463,41 +463,6 @@ fn bench_sequence24(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_reliability(c: &mut Criterion) {
-    let mut group = c.benchmark_group("reliability");
-
-    let rels = [
-        Reliability::Unreliable,
-        Reliability::UnreliableSequenced,
-        Reliability::Reliable,
-        Reliability::ReliableOrdered,
-        Reliability::ReliableSequenced,
-    ];
-
-    for rel in rels {
-        group.bench_with_input(
-            BenchmarkId::new("is_reliable", format!("{:?}", rel)),
-            &rel,
-            |b, rel| {
-                b.iter(|| {
-                    black_box(rel).is_reliable();
-                });
-            },
-        );
-
-        group.bench_with_input(
-            BenchmarkId::new("is_ordered", format!("{:?}", rel)),
-            &rel,
-            |b, rel| {
-                b.iter(|| {
-                    black_box(rel).is_ordered();
-                });
-            },
-        );
-    }
-
-    group.finish();
-}
 
 fn bench_buffer_allocation(c: &mut Criterion) {
     let mut group = c.benchmark_group("buffer_allocation");
@@ -533,7 +498,6 @@ criterion_group! {
         bench_unconnected_packets,
         bench_ack_payload,
         bench_sequence24,
-        bench_reliability,
         bench_buffer_allocation
 }
 
