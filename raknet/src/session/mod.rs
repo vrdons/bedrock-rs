@@ -21,7 +21,7 @@ mod tick;
 
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, BinaryHeap, VecDeque},
+    collections::{BinaryHeap, VecDeque},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -141,7 +141,8 @@ pub struct Session {
     outgoing_heap: BinaryHeap<QueuedEncap>,
     outgoing_packet_next_weights: [u64; 4],
     last_min_weight: u64,
-    sent_datagrams: BTreeMap<Sequence24, TrackedDatagram>,
+    sent_datagrams_base: Sequence24,
+    sent_datagrams: VecDeque<Option<TrackedDatagram>>,
     incoming_acks: VecDeque<SequenceRange>,
     incoming_naks: VecDeque<SequenceRange>,
     outgoing_acks: AckQueue,
@@ -179,7 +180,8 @@ impl Session {
             outgoing_heap: BinaryHeap::new(),
             outgoing_packet_next_weights: [0; 4],
             last_min_weight: 0,
-            sent_datagrams: BTreeMap::new(),
+            sent_datagrams_base: Sequence24::new(0),
+            sent_datagrams: VecDeque::with_capacity(tunables.reliable_window as usize),
             incoming_acks: VecDeque::new(),
             incoming_naks: VecDeque::new(),
             outgoing_acks: AckQueue::new(tunables.ack_queue_capacity),

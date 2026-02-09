@@ -161,36 +161,44 @@ impl Session {
     fn process_incoming_acks(&mut self, now: Instant) {
         while let Some(range) = self.incoming_acks.pop_front() {
             Self::for_each_sequence_in_range(range, |seq| {
-                if let Some(tracked) = self.sent_datagrams.remove(&seq) {
-                    if let crate::protocol::datagram::DatagramPayload::EncapsulatedPackets(_) =
-                        &tracked.datagram.payload
-                    {
-                        self.sliding
-                            .on_ack(now, &tracked.datagram, seq, tracked.send_time);
+                let dist = self.sent_datagrams_base.distance_to(seq);
+                if dist < self.sent_datagrams.len() as u32 {
+                    if let Some(tracked) = self.sent_datagrams[dist as usize].take() {
+                        if let crate::protocol::datagram::DatagramPayload::EncapsulatedPackets(_) =
+                            &tracked.datagram.payload
+                        {
+                            self.sliding
+                                .on_ack(now, &tracked.datagram, seq, tracked.send_time);
+                        }
+                    }
+                }
+            });
+        }
+        self.clean_sent_datagrams();
+    }
+
+    fn process_incoming_naks(&mut self, now: Instant) {
+        while let Some(range) = self.incoming_naks.pop_front() {
+            Self::for_each_sequence_in_range(range, |seq| {
+                let dist = self.sent_datagrams_base.distance_to(seq);
+                if dist < self.sent_datagrams.len() as u32 {
+                    if let Some(tracked) = &mut self.sent_datagrams[dist as usize] {
+                        if let crate::protocol::datagram::DatagramPayload::EncapsulatedPackets(_) =
+                            &tracked.datagram.payload
+                        {
+                            self.sliding.on_nak();
+                            tracked.next_send = now;
+                        }
                     }
                 }
             });
         }
     }
 
-    /// Applies queued NAK ranges to sent datagrams and schedules retransmission.
-    ///
-    /// For each sequence number in the stored NAK ranges, if a tracked sent datagram exists
-    /// and contains encapsulated packets, this marks a NAK with the sliding-window logic
-    /// and resets that datagram's next-send time to `now` so it will be retransmitted.
-    fn process_incoming_naks(&mut self, now: Instant) {
-        while let Some(range) = self.incoming_naks.pop_front() {
-            Self::for_each_sequence_in_range(range, |seq| {
-                if let Some(mut tracked) = self.sent_datagrams.remove(&seq) {
-                    if let crate::protocol::datagram::DatagramPayload::EncapsulatedPackets(_) =
-                        &tracked.datagram.payload
-                    {
-                        self.sliding.on_nak();
-                        tracked.next_send = now;
-                        self.sent_datagrams.insert(seq, tracked);
-                    }
-                }
-            });
+    fn clean_sent_datagrams(&mut self) {
+        while let Some(None) = self.sent_datagrams.front() {
+            self.sent_datagrams.pop_front();
+            self.sent_datagrams_base = self.sent_datagrams_base.next();
         }
     }
 
