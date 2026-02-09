@@ -463,7 +463,6 @@ fn bench_sequence24(c: &mut Criterion) {
     group.finish();
 }
 
-
 fn bench_buffer_allocation(c: &mut Criterion) {
     let mut group = c.benchmark_group("buffer_allocation");
 
