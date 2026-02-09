@@ -12,7 +12,7 @@ const SENDER_ID: u64 = 0x1234567890abcdef;
 fn bench_message_encode(c: &mut Criterion) {
     let mut group = c.benchmark_group("message_encode");
 
-    for size in [64, 256, 512, 1024, 4096] {
+    for size in [512, 1024, 4096] {
         group.throughput(Throughput::Bytes(size as u64));
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
@@ -36,7 +36,7 @@ fn bench_message_encode(c: &mut Criterion) {
 fn bench_message_decode(c: &mut Criterion) {
     let mut group = c.benchmark_group("message_decode");
 
-    for size in [64, 256, 512, 1024, 4096] {
+    for size in [512, 1024, 4096] {
         let payload = vec![0u8; size];
 
         let segment = MessageSegment {
@@ -66,7 +66,7 @@ fn bench_message_decode(c: &mut Criterion) {
 fn bench_message_segmentation(c: &mut Criterion) {
     let mut group = c.benchmark_group("message_segmentation");
 
-    for size in [1024, 4096, 8192, 16384] {
+    for size in [1024, 8192, 16384] {
         group.throughput(Throughput::Bytes(size as u64));
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
@@ -119,7 +119,7 @@ fn bench_discovery_marshal(c: &mut Criterion) {
     }
 
     // Message packets
-    for size in [64, 256, 1024] {
+    for size in [256, 1024] {
         let data = "x".repeat(size);
 
         group.throughput(Throughput::Bytes(size as u64));
@@ -182,7 +182,7 @@ fn bench_discovery_unmarshal(c: &mut Criterion) {
     }
 
     // Message packets
-    for size in [64, 256, 1024] {
+    for size in [256, 1024] {
         let data = "x".repeat(size);
 
         let packet = MessagePacket::new(0x9876543210fedcba, data);
@@ -248,7 +248,7 @@ fn bench_discovery_roundtrip(c: &mut Criterion) {
     }
 
     // Message
-    for size in [64, 256, 1024] {
+    for size in [256, 1024] {
         let data = "x".repeat(size);
 
         group.throughput(Throughput::Bytes(size as u64));

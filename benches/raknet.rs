@@ -91,7 +91,7 @@ fn create_test_ack_payload(range_count: usize) -> AckNackPayload {
 fn bench_datagram_encode(c: &mut Criterion) {
     let mut group = c.benchmark_group("datagram_encode");
 
-    for count in [1, 4, 8, 16] {
+    for count in [4, 8, 16] {
         let datagram = create_test_datagram(count);
 
         let mut tmp = BytesMut::with_capacity(1400);
@@ -118,7 +118,7 @@ fn bench_datagram_encode(c: &mut Criterion) {
 fn bench_datagram_decode(c: &mut Criterion) {
     let mut group = c.benchmark_group("datagram_decode");
 
-    for count in [1, 4, 8, 16] {
+    for count in [4, 8, 16] {
         let datagram = create_test_datagram(count);
 
         let mut buf = BytesMut::with_capacity(1400);
@@ -151,7 +151,7 @@ fn bench_datagram_decode(c: &mut Criterion) {
 fn bench_datagram_roundtrip(c: &mut Criterion) {
     let mut group = c.benchmark_group("datagram_roundtrip");
 
-    for count in [1, 4, 8, 16] {
+    for count in [4, 8, 16] {
         let datagram = create_test_datagram(count);
 
         let mut tmp = BytesMut::with_capacity(1400);
@@ -202,7 +202,7 @@ fn bench_encapsulated_packet_encode(c: &mut Criterion) {
 fn bench_encapsulated_packet_decode(c: &mut Criterion) {
     let mut group = c.benchmark_group("encapsulated_packet_decode");
 
-    for size in [64, 256, 512, 1024, 2048] {
+    for size in [512, 1024, 2048] {
         let packet = create_test_encapsulated_packet(size);
 
         let mut buf = BytesMut::with_capacity(size + 64);
@@ -232,7 +232,7 @@ fn bench_encapsulated_packet_decode(c: &mut Criterion) {
 fn bench_encapsulated_packet_roundtrip(c: &mut Criterion) {
     let mut group = c.benchmark_group("encapsulated_packet_roundtrip");
 
-    for size in [64, 256, 512, 1024, 2048] {
+    for size in [512, 1024, 2048] {
         let packet = create_test_encapsulated_packet(size);
 
         group.throughput(Throughput::Bytes(size as u64));
@@ -390,7 +390,7 @@ fn bench_unconnected_packets(c: &mut Criterion) {
 fn bench_ack_payload(c: &mut Criterion) {
     let mut group = c.benchmark_group("ack_payload");
 
-    for count in [1, 5, 10, 20, 50] {
+    for count in [20, 50] {
         let payload = create_test_ack_payload(count);
 
         let mut buf = BytesMut::with_capacity(256);
