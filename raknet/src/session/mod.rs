@@ -60,6 +60,8 @@ pub struct SessionTunables {
     pub reliable_window: u32,
     pub max_split_parts: u32,
     pub max_concurrent_splits: usize,
+    pub max_sent_datagrams: usize,
+    pub sent_datagram_timeout: Duration,
 }
 
 impl Default for SessionTunables {
@@ -72,6 +74,8 @@ impl Default for SessionTunables {
             reliable_window: constants::MAX_ACK_SEQUENCES as u32,
             max_split_parts: 8192,
             max_concurrent_splits: 4096,
+            max_sent_datagrams: 4096,
+            sent_datagram_timeout: Duration::from_secs(10),
         }
     }
 }
@@ -147,6 +151,8 @@ pub struct Session {
     incoming_naks: VecDeque<SequenceRange>,
     outgoing_acks: AckQueue,
     outgoing_naks: AckQueue,
+    max_sent_datagrams: usize,
+    sent_datagram_timeout: Duration,
 }
 
 impl Session {
@@ -186,6 +192,8 @@ impl Session {
             incoming_naks: VecDeque::new(),
             outgoing_acks: AckQueue::new(tunables.ack_queue_capacity),
             outgoing_naks: AckQueue::new(tunables.ack_queue_capacity),
+            max_sent_datagrams: tunables.max_sent_datagrams,
+            sent_datagram_timeout: tunables.sent_datagram_timeout,
         };
 
         for level in 0..4 {

@@ -174,7 +174,7 @@ impl Session {
                 }
             });
         }
-        self.clean_sent_datagrams();
+        self.clean_sent_datagrams(now);
     }
 
     fn process_incoming_naks(&mut self, now: Instant) {
@@ -195,10 +195,43 @@ impl Session {
         }
     }
 
-    fn clean_sent_datagrams(&mut self) {
-        while let Some(None) = self.sent_datagrams.front() {
+    fn clean_sent_datagrams(&mut self, now: Instant) {
+        // 1. Remove leading None entries (standard cleanup)
+        // Also remove leading entries that are too old (timed out)
+        loop {
+            match self.sent_datagrams.front() {
+                Some(None) => {
+                    self.sent_datagrams.pop_front();
+                    self.sent_datagrams_base = self.sent_datagrams_base.next();
+                }
+                Some(Some(tracked)) => {
+                    if now.duration_since(tracked.send_time) > self.sent_datagram_timeout {
+                        // Drop timed-out entry
+                        self.sent_datagrams.pop_front();
+                        self.sent_datagrams_base = self.sent_datagrams_base.next();
+                    } else {
+                        break;
+                    }
+                }
+                None => break,
+            }
+        }
+
+        // 2. If the queue is still too large, force eviction of oldest entries
+        // even if they are Some. We evict from the front until we are within limits.
+        while self.sent_datagrams.len() > self.max_sent_datagrams {
+            // We forcefully remove from front.
+            // If it was Some(_), we are giving up on retransmitting it.
+            // If it was None, we are just advancing base.
             self.sent_datagrams.pop_front();
             self.sent_datagrams_base = self.sent_datagrams_base.next();
+        }
+
+        // 3. Trim trailing None entries
+        // These are slots that have been ACKed or cleared but are sitting at the end of the queue.
+        // Removing them does not affect base, only reduces queue size.
+        while let Some(None) = self.sent_datagrams.back() {
+            self.sent_datagrams.pop_back();
         }
     }
 
