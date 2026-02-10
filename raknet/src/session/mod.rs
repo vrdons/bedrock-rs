@@ -21,7 +21,7 @@ mod tick;
 
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, BinaryHeap, VecDeque},
+    collections::{BinaryHeap, VecDeque},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -60,6 +60,8 @@ pub struct SessionTunables {
     pub reliable_window: u32,
     pub max_split_parts: u32,
     pub max_concurrent_splits: usize,
+    pub max_sent_datagrams: usize,
+    pub sent_datagram_timeout: Duration,
 }
 
 impl Default for SessionTunables {
@@ -72,6 +74,8 @@ impl Default for SessionTunables {
             reliable_window: constants::MAX_ACK_SEQUENCES as u32,
             max_split_parts: 8192,
             max_concurrent_splits: 4096,
+            max_sent_datagrams: 4096,
+            sent_datagram_timeout: Duration::from_secs(10),
         }
     }
 }
@@ -141,11 +145,14 @@ pub struct Session {
     outgoing_heap: BinaryHeap<QueuedEncap>,
     outgoing_packet_next_weights: [u64; 4],
     last_min_weight: u64,
-    sent_datagrams: BTreeMap<Sequence24, TrackedDatagram>,
+    sent_datagrams_base: Sequence24,
+    sent_datagrams: VecDeque<Option<TrackedDatagram>>,
     incoming_acks: VecDeque<SequenceRange>,
     incoming_naks: VecDeque<SequenceRange>,
     outgoing_acks: AckQueue,
     outgoing_naks: AckQueue,
+    max_sent_datagrams: usize,
+    sent_datagram_timeout: Duration,
 }
 
 impl Session {
@@ -179,11 +186,14 @@ impl Session {
             outgoing_heap: BinaryHeap::new(),
             outgoing_packet_next_weights: [0; 4],
             last_min_weight: 0,
-            sent_datagrams: BTreeMap::new(),
+            sent_datagrams_base: Sequence24::new(0),
+            sent_datagrams: VecDeque::with_capacity(tunables.reliable_window as usize),
             incoming_acks: VecDeque::new(),
             incoming_naks: VecDeque::new(),
             outgoing_acks: AckQueue::new(tunables.ack_queue_capacity),
             outgoing_naks: AckQueue::new(tunables.ack_queue_capacity),
+            max_sent_datagrams: tunables.max_sent_datagrams,
+            sent_datagram_timeout: tunables.sent_datagram_timeout,
         };
 
         for level in 0..4 {

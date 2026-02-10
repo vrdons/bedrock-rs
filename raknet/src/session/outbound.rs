@@ -26,7 +26,7 @@ impl Session {
         if channel as usize >= self.ordering.max_channels() {
             return 0;
         }
-        let mut payload_buf = BytesMut::new();
+        let mut payload_buf = BytesMut::with_capacity(128); // Pre-allocate small buffer
         if pkt.encode(&mut payload_buf).is_err() {
             return 0;
         }
@@ -363,7 +363,13 @@ impl Session {
         if let DatagramPayload::EncapsulatedPackets(_) = &tracked.datagram.payload {
             self.sliding.on_reliable_send(&tracked.datagram);
         }
-        self.sent_datagrams.insert(seq, tracked);
+
+        let dist = self.sent_datagrams_base.distance_to(seq) as usize;
+        if dist >= self.sent_datagrams.len() {
+            self.sent_datagrams.resize_with(dist + 1, || None);
+        }
+        self.sent_datagrams[dist] = Some(tracked);
+
         OutgoingDatagram::Shared(dgram)
     }
 
@@ -393,11 +399,13 @@ impl Session {
         bw: &mut usize,
     ) -> Vec<Sequence24> {
         let mut to_resend = Vec::new();
-        for (seq, tracked) in self.sent_datagrams.iter() {
-            let dgram_size = tracked.datagram.size();
-            if tracked.next_send <= now && *bw >= dgram_size {
-                *bw -= dgram_size;
-                to_resend.push(*seq);
+        for (i, tracked_opt) in self.sent_datagrams.iter().enumerate() {
+            if let Some(tracked) = tracked_opt {
+                let dgram_size = tracked.datagram.size();
+                if tracked.next_send <= now && *bw >= dgram_size {
+                    *bw -= dgram_size;
+                    to_resend.push(self.sent_datagrams_base + (i as i32));
+                }
             }
         }
         to_resend
@@ -412,12 +420,15 @@ impl Session {
         let mut resent_any = false;
 
         for seq in to_resend {
-            if let Some(tracked) = self.sent_datagrams.get_mut(&seq) {
-                let rto = self.sliding.get_rto_for_retransmission();
-                tracked.send_time = now;
-                tracked.next_send = now + rto;
-                resent_any = true;
-                out.push(OutgoingDatagram::Shared(tracked.datagram.clone()));
+            let dist = self.sent_datagrams_base.distance_to(seq) as usize;
+            if dist < self.sent_datagrams.len() {
+                if let Some(tracked) = &mut self.sent_datagrams[dist] {
+                    let rto = self.sliding.get_rto_for_retransmission();
+                    tracked.send_time = now;
+                    tracked.next_send = now + rto;
+                    resent_any = true;
+                    out.push(OutgoingDatagram::Shared(tracked.datagram.clone()));
+                }
             }
         }
 

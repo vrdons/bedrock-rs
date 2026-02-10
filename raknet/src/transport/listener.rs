@@ -68,6 +68,9 @@ pub struct RaknetListenerConfig {
 
     /// Maximum number of concurrent split packets being reassembled.
     pub max_concurrent_splits: usize,
+
+    /// Timeout for tracked sent datagrams.
+    pub sent_datagram_timeout: Duration,
 }
 
 impl Default for RaknetListenerConfig {
@@ -98,6 +101,7 @@ impl Default for RaknetListenerConfig {
             reliable_window: constants::MAX_ACK_SEQUENCES as u32,
             max_split_parts: 8192,
             max_concurrent_splits: 4096,
+            sent_datagram_timeout: constants::DEFAULT_SENT_DATAGRAM_TIMEOUT,
         }
     }
 }
@@ -131,6 +135,7 @@ pub struct RaknetListenerConfigBuilder {
     reliable_window: u32,
     max_split_parts: u32,
     max_concurrent_splits: usize,
+    sent_datagram_timeout: Duration,
 }
 
 impl Default for RaknetListenerConfigBuilder {
@@ -155,6 +160,7 @@ impl Default for RaknetListenerConfigBuilder {
             reliable_window: config.reliable_window,
             max_split_parts: config.max_split_parts,
             max_concurrent_splits: config.max_concurrent_splits,
+            sent_datagram_timeout: config.sent_datagram_timeout,
         }
     }
 }
@@ -255,6 +261,12 @@ impl RaknetListenerConfigBuilder {
         self
     }
 
+    /// Sets the sent datagram timeout.
+    pub fn sent_datagram_timeout(mut self, timeout: Duration) -> Self {
+        self.sent_datagram_timeout = timeout;
+        self
+    }
+
     /// Builds a `RaknetListenerConfig` from the builder.
     ///
     /// This consumes the builder and returns a concrete `RaknetListenerConfig`.
@@ -279,6 +291,7 @@ impl RaknetListenerConfigBuilder {
             reliable_window: self.reliable_window,
             max_split_parts: self.max_split_parts,
             max_concurrent_splits: self.max_concurrent_splits,
+            sent_datagram_timeout: self.sent_datagram_timeout,
         }
     }
 }

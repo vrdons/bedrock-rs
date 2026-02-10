@@ -56,12 +56,13 @@ impl SlidingWindow {
 
         if self.estimated_rtt < 0.0 {
             self.estimated_rtt = rtt_ms;
-            self.deviation_rtt = rtt_ms;
+            self.deviation_rtt = rtt_ms / 2.0;
         } else {
-            let gain = 0.05;
+            let alpha = 0.125;
+            let beta = 0.25;
             let diff = rtt_ms - self.estimated_rtt;
-            self.estimated_rtt += gain * diff;
-            self.deviation_rtt += gain * (diff.abs() - self.deviation_rtt);
+            self.estimated_rtt += alpha * diff;
+            self.deviation_rtt = (1.0 - beta) * self.deviation_rtt + beta * diff.abs();
         }
 
         let is_new_block = acked_seq > self.next_congestion_block;

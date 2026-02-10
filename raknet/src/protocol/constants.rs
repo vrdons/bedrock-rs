@@ -51,6 +51,9 @@ pub const RAKNET_DATAGRAM_HEADER_SIZE: usize = 4;
 
 // === Connection / session timing ===
 
+/// Default timeout for sent datagrams before they are dropped from the sender window.
+pub const DEFAULT_SENT_DATAGRAM_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Maximum number of connection attempts before giving up.
 pub const MAXIMUM_CONNECTION_ATTEMPTS: usize = 10;
 

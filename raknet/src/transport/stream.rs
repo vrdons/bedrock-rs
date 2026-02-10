@@ -14,8 +14,9 @@ use std::task::{Context, Poll};
 
 use crate::protocol::{
     constants::{
-        DEFAULT_UNCONNECTED_MAGIC, MAX_ACK_SEQUENCES, MAXIMUM_MTU_SIZE, MAXIMUM_ORDERING_CHANNELS,
-        MINIMUM_MTU_SIZE, RAKNET_PROTOCOL_VERSION, UDP_HEADER_SIZE,
+        DEFAULT_SENT_DATAGRAM_TIMEOUT, DEFAULT_UNCONNECTED_MAGIC, MAX_ACK_SEQUENCES,
+        MAXIMUM_MTU_SIZE, MAXIMUM_ORDERING_CHANNELS, MINIMUM_MTU_SIZE, RAKNET_PROTOCOL_VERSION,
+        UDP_HEADER_SIZE,
     },
     datagram::Datagram,
     packet::RaknetPacket,
@@ -52,6 +53,10 @@ pub struct RaknetStreamConfig {
     pub max_split_parts: u32,
     /// Maximum number of concurrent split packets being reassembled.
     pub max_concurrent_splits: usize,
+    /// Maximum number of tracked sent datagrams.
+    pub max_sent_datagrams: Option<usize>,
+    /// Timeout for tracked sent datagrams.
+    pub sent_datagram_timeout: Option<Duration>,
 }
 
 impl Default for RaknetStreamConfig {
@@ -68,6 +73,8 @@ impl Default for RaknetStreamConfig {
             reliable_window: MAX_ACK_SEQUENCES as u32,
             max_split_parts: 8192,
             max_concurrent_splits: 4096,
+            max_sent_datagrams: None,
+            sent_datagram_timeout: None,
         }
     }
 }
@@ -102,6 +109,8 @@ pub struct RaknetStreamConfigBuilder {
     reliable_window: u32,
     max_split_parts: u32,
     max_concurrent_splits: usize,
+    max_sent_datagrams: Option<usize>,
+    sent_datagram_timeout: Option<Duration>,
 }
 
 impl Default for RaknetStreamConfigBuilder {
@@ -119,6 +128,8 @@ impl Default for RaknetStreamConfigBuilder {
             reliable_window: config.reliable_window,
             max_split_parts: config.max_split_parts,
             max_concurrent_splits: config.max_concurrent_splits,
+            max_sent_datagrams: config.max_sent_datagrams,
+            sent_datagram_timeout: config.sent_datagram_timeout,
         }
     }
 }
@@ -194,6 +205,22 @@ impl RaknetStreamConfigBuilder {
         self
     }
 
+    /// Sets the maximum number of tracked sent datagrams.
+    ///
+    /// If not set, defaults to `reliable_window` size.
+    pub fn max_sent_datagrams(mut self, max: usize) -> Self {
+        self.max_sent_datagrams = Some(max);
+        self
+    }
+
+    /// Sets the timeout for tracked sent datagrams.
+    ///
+    /// If not set, defaults to 10 seconds.
+    pub fn sent_datagram_timeout(mut self, timeout: Duration) -> Self {
+        self.sent_datagram_timeout = Some(timeout);
+        self
+    }
+
     /// Constructs a `RaknetStreamConfig` from this builder.
     ///
     /// The resulting config copies all tunable fields from the builder. The builder must have
@@ -215,6 +242,8 @@ impl RaknetStreamConfigBuilder {
             reliable_window: self.reliable_window,
             max_split_parts: self.max_split_parts,
             max_concurrent_splits: self.max_concurrent_splits,
+            max_sent_datagrams: self.max_sent_datagrams,
+            sent_datagram_timeout: self.sent_datagram_timeout,
         }
     }
 }
@@ -802,6 +831,12 @@ fn ensure_client_session<'a>(
                     reliable_window: config.reliable_window,
                     max_split_parts: config.max_split_parts,
                     max_concurrent_splits: config.max_concurrent_splits,
+                    max_sent_datagrams: config
+                        .max_sent_datagrams
+                        .unwrap_or(config.reliable_window as usize),
+                    sent_datagram_timeout: config
+                        .sent_datagram_timeout
+                        .unwrap_or(DEFAULT_SENT_DATAGRAM_TIMEOUT),
                 },
                 ..SessionConfig::default()
             },

@@ -88,4 +88,49 @@ mod tests {
             panic!("expected nak payload");
         }
     }
+
+    #[test]
+    fn clean_sent_datagrams_evicts_excess() {
+        use crate::protocol::packet::RaknetPacket;
+        use crate::session::SessionTunables;
+        use std::time::Duration;
+        let tunables = SessionTunables {
+            max_sent_datagrams: 3,
+            sent_datagram_timeout: Duration::from_secs(10),
+            ..Default::default()
+        };
+        let mut session = Session::with_tunables(1200, tunables);
+        let now = Instant::now();
+
+        // Create 5 separate datagrams
+        for i in 0..5 {
+            session.queue_packet(
+                RaknetPacket::UserData {
+                    id: 0xFE,
+                    payload: bytes::Bytes::from(vec![i as u8]),
+                },
+                crate::protocol::reliability::Reliability::Reliable,
+                0,
+                crate::protocol::state::RakPriority::Normal,
+            );
+            // Build datagram to track it.
+            // Since we queue one small packet and immediately build, it should create one datagram per packet.
+            let d = session.build_data_datagram(now);
+            assert!(d.is_some(), "should build datagram {}", i);
+        }
+
+        // Initially, sent_datagrams should have 5 entries (before cleanup)
+        assert_eq!(session.sent_datagrams.len(), 5);
+
+        // Run tick, which triggers clean_sent_datagrams via process_incoming_acks_naks
+        session.on_tick(now);
+
+        // Should be trimmed to 3
+        assert_eq!(session.sent_datagrams.len(), 3);
+
+        // Base should have advanced by 2 (0 and 1 dropped). Base starts at 0.
+        // Dropped: 0, 1. Remaining: 2, 3, 4.
+        // Base should be 2.
+        assert_eq!(session.sent_datagrams_base.value(), 2);
+    }
 }
