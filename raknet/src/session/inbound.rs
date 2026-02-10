@@ -223,7 +223,13 @@ impl Session {
             // We forcefully remove from front.
             // If it was Some(_), we are giving up on retransmitting it.
             // If it was None, we are just advancing base.
-            self.sent_datagrams.pop_front();
+            if let Some(Some(dropped)) = self.sent_datagrams.pop_front() {
+                tracing::warn!(
+                    "Forcefully evicting un-ACK'd datagram due to full send window. seq={:?}, sent_at={:?}",
+                    self.sent_datagrams_base,
+                    dropped.send_time
+                );
+            }
             self.sent_datagrams_base = self.sent_datagrams_base.next();
         }
 

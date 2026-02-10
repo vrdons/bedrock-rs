@@ -54,7 +54,7 @@ pub(super) fn server_session_config(config: &RaknetListenerConfig) -> SessionCon
             max_split_parts: config.max_split_parts,
             max_concurrent_splits: config.max_concurrent_splits,
             max_sent_datagrams: config.reliable_window as usize,
-            sent_datagram_timeout: Duration::from_secs(10), // Default timeout
+            sent_datagram_timeout: config.sent_datagram_timeout,
         },
         ..Default::default()
     }
