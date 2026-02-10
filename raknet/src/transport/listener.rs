@@ -101,7 +101,7 @@ impl Default for RaknetListenerConfig {
             reliable_window: constants::MAX_ACK_SEQUENCES as u32,
             max_split_parts: 8192,
             max_concurrent_splits: 4096,
-            sent_datagram_timeout: Duration::from_secs(10),
+            sent_datagram_timeout: constants::DEFAULT_SENT_DATAGRAM_TIMEOUT,
         }
     }
 }

@@ -225,7 +225,7 @@ impl Session {
             // If it was None, we are just advancing base.
             if let Some(Some(dropped)) = self.sent_datagrams.pop_front() {
                 tracing::warn!(
-                    "Forcefully evicting un-ACK'd datagram due to full send window. seq={:?}, sent_at={:?}",
+                    "Forcefully evicting un-ACK'd datagram due to full send window. base_seq={:?}, sent_at={:?}",
                     self.sent_datagrams_base,
                     dropped.send_time
                 );

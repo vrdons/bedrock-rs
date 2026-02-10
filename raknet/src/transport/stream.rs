@@ -14,8 +14,9 @@ use std::task::{Context, Poll};
 
 use crate::protocol::{
     constants::{
-        DEFAULT_UNCONNECTED_MAGIC, MAX_ACK_SEQUENCES, MAXIMUM_MTU_SIZE, MAXIMUM_ORDERING_CHANNELS,
-        MINIMUM_MTU_SIZE, RAKNET_PROTOCOL_VERSION, UDP_HEADER_SIZE,
+        DEFAULT_SENT_DATAGRAM_TIMEOUT, DEFAULT_UNCONNECTED_MAGIC, MAX_ACK_SEQUENCES,
+        MAXIMUM_MTU_SIZE, MAXIMUM_ORDERING_CHANNELS, MINIMUM_MTU_SIZE, RAKNET_PROTOCOL_VERSION,
+        UDP_HEADER_SIZE,
     },
     datagram::Datagram,
     packet::RaknetPacket,
@@ -835,7 +836,7 @@ fn ensure_client_session<'a>(
                         .unwrap_or(config.reliable_window as usize),
                     sent_datagram_timeout: config
                         .sent_datagram_timeout
-                        .unwrap_or(Duration::from_secs(10)),
+                        .unwrap_or(DEFAULT_SENT_DATAGRAM_TIMEOUT),
                 },
                 ..SessionConfig::default()
             },
