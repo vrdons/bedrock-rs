@@ -49,7 +49,7 @@ impl NethernetStream {
         let media_engine = MediaEngine::default();
 
         // Configure SettingEngine to avoid IPv6 link-local binding issues
-        let mut setting_engine = SettingEngine::default();
+        let setting_engine = SettingEngine::default();
 
         let api = APIBuilder::new()
             .with_media_engine(media_engine)

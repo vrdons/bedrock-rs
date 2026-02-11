@@ -121,7 +121,7 @@ impl<S: Signaling + 'static> NethernetListener<S> {
         let media_engine = MediaEngine::default();
 
         // Configure SettingEngine to avoid IPv6 link-local binding issues
-        let mut setting_engine = SettingEngine::default();
+        let setting_engine = SettingEngine::default();
 
         let api = APIBuilder::new()
             .with_media_engine(media_engine)
@@ -183,19 +183,20 @@ impl<S: Signaling + 'static> NethernetListener<S> {
             let mut first_candidate = true;
             while let Some(sig) = signal_rx.recv().await {
                 if sig.signal_type == SignalType::Candidate {
-                    // We need to wrap them in RTCIceCandidateInit
-                    let candidate_init = webrtc::ice_transport::ice_candidate::RTCIceCandidateInit {
-                        candidate: sig.data.clone(),
-                        sdp_mid: Some("0".to_string()),
-                        sdp_mline_index: Some(0),
-                        username_fragment: None,
-                    };
-                    
-                    if let Err(e) = peer_connection_clone.add_ice_candidate(candidate_init).await {
-                        tracing::warn!("Failed to add ICE candidate: {}", e);
-                        continue;
+                    // Deserialize sig.data into an RTCIceCandidateInit
+                    if let Ok(candidate_init) = serde_json::from_str::<
+                        webrtc::ice_transport::ice_candidate::RTCIceCandidateInit,
+                    >(&sig.data)
+                    {
+                        if let Err(e) = peer_connection_clone
+                            .add_ice_candidate(candidate_init)
+                            .await
+                        {
+                            tracing::warn!("Failed to add ICE candidate: {}", e);
+                            continue;
+                        }
                     }
-                    
+
                     // Notify waiting handler AFTER adding first candidate to peer connection
                     if first_candidate {
                         first_candidate = false;
@@ -254,7 +255,7 @@ impl<S: Signaling + 'static> NethernetListener<S> {
         // Channel to notify when data channels are ready
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
         let ready_tx = Arc::new(tokio::sync::Mutex::new(Some(ready_tx)));
-        
+
         // Event handler for data channels
         let session_clone = session.clone();
         let ready_tx_clone = ready_tx.clone();
@@ -285,16 +286,19 @@ impl<S: Signaling + 'static> NethernetListener<S> {
         let session_clone = session.clone();
         let incoming_tx_clone = incoming_tx.clone();
         tokio::spawn(async move {
-            // Wait for first ICE candidate (no timeout)
-            match candidate_rx.await {
-                Ok(()) => {
+            // Wait for first ICE candidate (with timeout)
+            match tokio::time::timeout(tokio::time::Duration::from_secs(5), candidate_rx).await {
+                Ok(Ok(())) => {
                     tracing::debug!("Received first ICE candidate");
                 }
-                Err(_) => {
+                Ok(Err(_)) => {
                     tracing::warn!("Candidate notifier dropped before receiving candidate");
                 }
+                Err(_) => {
+                    tracing::warn!("Timeout waiting for first ICE candidate");
+                }
             }
-            
+
             // Wait up to 5 seconds for data channel to be ready
             match tokio::time::timeout(tokio::time::Duration::from_secs(5), ready_rx).await {
                 Ok(Ok(())) => {

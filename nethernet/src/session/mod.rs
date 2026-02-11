@@ -196,22 +196,27 @@ impl Session {
     /// This method polls the ICE connection state until it reaches Connected or Completed state,
     /// or returns an error if the connection fails.
     pub async fn wait_for_connection(&self, timeout_ms: Option<u64>) -> Result<()> {
-        use webrtc::ice_transport::ice_connection_state::RTCIceConnectionState;
-        
         let timeout = timeout_ms.unwrap_or(5000);
-        let max_attempts = timeout / 100; // Check every 100ms
-        
+        let max_attempts = (timeout / 100).max(1); // Check every 100ms
+
         for attempt in 0..max_attempts {
             let state = self.connection_state();
-            
-            tracing::debug!("Waiting for WebRTC connection... (attempt {}/{}), state: {:?}", attempt + 1, max_attempts, state);
-            
+
+            tracing::trace!(
+                "Waiting for WebRTC connection... (attempt {}/{}), state: {:?}",
+                attempt + 1,
+                max_attempts,
+                state
+            );
+
             match state {
                 RTCIceConnectionState::Connected | RTCIceConnectionState::Completed => {
                     tracing::info!("WebRTC connection established!");
                     return Ok(());
                 }
-                RTCIceConnectionState::Failed | RTCIceConnectionState::Disconnected | RTCIceConnectionState::Closed => {
+                RTCIceConnectionState::Failed
+                | RTCIceConnectionState::Disconnected
+                | RTCIceConnectionState::Closed => {
                     return Err(NethernetError::ConnectionClosed);
                 }
                 _ => {
@@ -219,7 +224,7 @@ impl Session {
                 }
             }
         }
-        
-        Err(NethernetError::ConnectionClosed)
+
+        Err(NethernetError::Timeout)
     }
 }
