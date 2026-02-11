@@ -22,7 +22,7 @@ use webrtc::peer_connection::configuration::RTCConfiguration;
 
 /// NetherNet listener - accepts WebRTC connections
 pub struct NethernetListener<S: Signaling> {
-    incoming: Arc<Mutex<mpsc::UnboundedReceiver<Arc<Session>>>>,
+    incoming: mpsc::UnboundedReceiver<Arc<Session>>,
     local_addr: SocketAddr,
     cancel_token: CancellationToken,
     _signal_handler_task: JoinHandle<()>,
@@ -51,7 +51,7 @@ impl<S: Signaling + 'static> NethernetListener<S> {
         );
 
         let listener = Self {
-            incoming: Arc::new(Mutex::new(incoming_rx)),
+            incoming: incoming_rx,
             local_addr,
             cancel_token,
             _signal_handler_task: signal_handler_task,
@@ -302,6 +302,8 @@ impl<S: Signaling + 'static> NethernetListener<S> {
                 }
                 Err(_) => {
                     tracing::warn!("Timeout waiting for first ICE candidate");
+                    let _ = incoming_tx_clone.send(session_clone);
+                    return;
                 }
             }
 
@@ -323,9 +325,8 @@ impl<S: Signaling + 'static> NethernetListener<S> {
     }
 
     /// Waits for and returns the next inbound session.
-    pub async fn accept(&self) -> Result<Arc<Session>> {
-        let mut incoming = self.incoming.lock().await;
-        incoming
+    pub async fn accept(&mut self) -> Result<Arc<Session>> {
+        self.incoming
             .recv()
             .await
             .ok_or_else(|| NethernetError::ConnectionClosed)
@@ -343,20 +344,13 @@ impl<S: Signaling> Drop for NethernetListener<S> {
     }
 }
 
-impl<S: Signaling + 'static> Stream for NethernetListener<S> {
+impl<S: Signaling + 'static + Unpin> Stream for NethernetListener<S> {
     type Item = Arc<Session>;
 
-    /// Polls the listener for the next inbound session, returning Pending if the internal queue lock is contended.
+    /// Polls the listener for the next inbound session, returning Pending if the internal queue is empty.
     ///
-    /// This attempts to acquire the internal incoming-session mutex without waiting; if the lock is held by
-    /// another task, the method returns [`Poll::Pending`]. When the lock is acquired, it delegates to the
-    /// inner receiver's poll to produce the next [`Arc<Session>`].
+    /// This method delegates to the inner receiver's poll to produce the next [`Arc<Session>`].
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut incoming = match self.incoming.try_lock() {
-            Ok(guard) => guard,
-            Err(_) => return Poll::Pending,
-        };
-
-        Pin::new(&mut *incoming).poll_recv(cx)
+        self.get_mut().incoming.poll_recv(cx)
     }
 }

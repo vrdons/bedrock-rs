@@ -5,9 +5,9 @@
 //! - Connects via WebRTC
 //! - Sends and receives packets
 
-use bytes::Bytes;
 use nethernet::NethernetStream;
 use nethernet::signaling::lan::LanSignaling;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use rand::RngCore;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -82,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Connect to the server using discovered network ID
-    let stream = NethernetStream::connect(
+    let mut stream = NethernetStream::connect(
         signaling.clone(),
         server_network_id.to_string(),
         server_addr,
@@ -94,22 +94,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Send some test packets
     for i in 1..=10 {
         let message = format!("Hello from client, packet #{}", i);
-        let data = Bytes::from(message.clone());
 
         tracing::debug!("📤 Sending: {}", message);
-        stream.send(data).await?;
+        stream.write_all(message.as_bytes()).await?;
 
         // Receive echo response
-        match stream.recv().await? {
-            Some(response) => {
-                let text = String::from_utf8_lossy(&response);
-                tracing::debug!("📥 Received: {}", text);
-            }
-            None => {
-                tracing::warn!("Connection closed by server");
-                break;
-            }
+        let mut buf = vec![0u8; 1024];
+        let n = stream.read(&mut buf).await?;
+
+        if n == 0 {
+            tracing::warn!("Connection closed by server");
+            break;
         }
+
+        let text = String::from_utf8_lossy(&buf[..n]);
+        tracing::debug!("📥 Received: {}", text);
 
         // Wait a bit between packets
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -117,12 +116,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test large packet (will be segmented)
     tracing::info!("📦 Sending large packet (20KB)...");
-    let large_data = Bytes::from(vec![0xAB; 20_000]);
-    stream.send(large_data).await?;
+    let large_data = vec![0xAB; 20_000];
+    stream.write_all(&large_data).await?;
 
-    if let Some(response) = stream.recv().await? {
-        tracing::info!("✅ Large packet echoed back ({} bytes)", response.len());
-    }
+    // Read back large packet
+    let mut response = vec![0u8; 20_000];
+    stream.read_exact(&mut response).await?;
+    tracing::info!("✅ Large packet echoed back ({} bytes)", response.len());
 
     // Close connection gracefully
     tracing::info!("👋 Closing connection...");
