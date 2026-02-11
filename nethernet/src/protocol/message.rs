@@ -78,7 +78,7 @@ impl Message {
         if self.expected_segments == 0 && segment.remaining_segments > 0 {
             self.expected_segments = segment.remaining_segments + 1;
             // Pre-allocate buffer to avoid reallocations
-            let estimated = self.expected_segments as usize * MAX_MESSAGE_SIZE;
+            let estimated = self.expected_segments as usize * segment.data.len();
             self.data.reserve(estimated);
         }
 

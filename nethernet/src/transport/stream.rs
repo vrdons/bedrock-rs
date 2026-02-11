@@ -14,6 +14,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio_util::io::StreamReader;
 use tokio_util::sync::{CancellationToken, ReusableBoxFuture};
 use webrtc::api::APIBuilder;
 use webrtc::api::media_engine::MediaEngine;
@@ -22,12 +23,36 @@ use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 
 /// NetherNet stream - data transmission over WebRTC
+struct SessionStream {
+    session: Arc<Session>,
+    recv_future: ReusableBoxFuture<'static, Result<Option<Bytes>>>,
+}
+
+impl Stream for SessionStream {
+    type Item = io::Result<Bytes>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.recv_future.poll(cx) {
+            Poll::Ready(result) => {
+                let session = self.session.clone();
+                self.recv_future.set(async move { session.recv().await });
+                match result {
+                    Ok(Some(data)) => Poll::Ready(Some(Ok(data))),
+                    Ok(None) => Poll::Ready(None),
+                    Err(e) => Poll::Ready(Some(Err(io::Error::new(io::ErrorKind::Other, e)))),
+                }
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+/// NetherNet stream - data transmission over WebRTC
 pub struct NethernetStream {
     session: Arc<Session>,
     remote_addr: SocketAddr,
-    recv_future: ReusableBoxFuture<'static, Result<Option<Bytes>>>,
+    reader: StreamReader<SessionStream, Bytes>,
     send_future: Option<ReusableBoxFuture<'static, Result<()>>>,
-    read_buf: std::io::Cursor<Bytes>,
 }
 
 impl NethernetStream {
@@ -279,12 +304,16 @@ impl NethernetStream {
         let session_clone = session.clone();
         let recv_future = ReusableBoxFuture::new(async move { session_clone.recv().await });
         
+        let stream = SessionStream {
+            session: session.clone(),
+            recv_future,
+        };
+
         Self {
             session,
             remote_addr,
-            recv_future,
+            reader: StreamReader::new(stream),
             send_future: None,
-            read_buf: std::io::Cursor::new(Bytes::new()),
         }
     }
 
@@ -328,18 +357,29 @@ impl Stream for NethernetStream {
     /// - `Poll::Ready(Some(Err(e)))` when an error occurred while receiving.
     /// - `Poll::Pending` when no item is ready yet.
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.recv_future.poll(cx) {
-            Poll::Ready(result) => {
-                // Reset future for next recv
-                let session = self.session.clone();
-                self.recv_future.set(async move { session.recv().await });
-                
-                match result {
-                    Ok(Some(data)) => Poll::Ready(Some(Ok(data))),
-                    Ok(None) => Poll::Ready(None),
-                    Err(e) => Poll::Ready(Some(Err(e))),
+        match Pin::new(self.reader.get_mut()).poll_next(cx) {
+            Poll::Ready(Some(Ok(data))) => Poll::Ready(Some(Ok(data))),
+            Poll::Ready(Some(Err(e))) => {
+                if e.kind() == io::ErrorKind::Other {
+                    // Try to recover NethernetError
+                    let inner = e.into_inner();
+                    if let Some(boxed_err) = inner {
+                        match boxed_err.downcast::<NethernetError>() {
+                            Ok(nethernet_err) => Poll::Ready(Some(Err(*nethernet_err))),
+                            Err(boxed_err) => {
+                                let io_err = io::Error::new(io::ErrorKind::Other, boxed_err);
+                                Poll::Ready(Some(Err(NethernetError::Io(io_err))))
+                            }
+                        }
+                    } else {
+                        let io_err = io::Error::new(io::ErrorKind::Other, "Unknown IO error");
+                        Poll::Ready(Some(Err(NethernetError::Io(io_err))))
+                    }
+                } else {
+                    Poll::Ready(Some(Err(NethernetError::Io(e))))
                 }
             }
+            Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,
         }
     }
@@ -351,38 +391,7 @@ impl AsyncRead for NethernetStream {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        loop {
-            // Read from buffer if available
-            if self.read_buf.position() < self.read_buf.get_ref().len() as u64 {
-                let n = std::io::Read::read(&mut self.read_buf, buf.initialize_unfilled())?;
-                buf.advance(n);
-                return Poll::Ready(Ok(()));
-            }
-
-            // Buffer empty, poll for new data
-            match self.recv_future.poll(cx) {
-                Poll::Ready(result) => {
-                    // Reset future immediately
-                    let session = self.session.clone();
-                    self.recv_future.set(async move { session.recv().await });
-
-                    match result {
-                        Ok(Some(data)) => {
-                            self.read_buf = std::io::Cursor::new(data);
-                            // Continue loop to read from new buffer
-                        }
-                        Ok(None) => {
-                            // EOF
-                            return Poll::Ready(Ok(()));
-                        }
-                        Err(e) => {
-                            return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e)));
-                        }
-                    }
-                }
-                Poll::Pending => return Poll::Pending,
-            }
-        }
+        Pin::new(&mut self.reader).poll_read(cx, buf)
     }
 }
 
