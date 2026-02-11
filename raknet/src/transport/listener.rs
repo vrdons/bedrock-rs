@@ -9,13 +9,15 @@ use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio_util::codec::BytesCodec;
 use tokio_util::sync::CancellationToken;
+use tokio_util::udp::UdpFramed;
 
 use futures::{Stream, StreamExt};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use crate::protocol::constants::{self, UDP_HEADER_SIZE};
+use crate::protocol::constants;
 use crate::transport::listener_conn::SessionState;
 use crate::transport::mux::new_tick_interval;
 use crate::transport::stream::RaknetStream;
@@ -490,9 +492,8 @@ async fn run_listener_muxer(
 
     cancel_token: CancellationToken,
 ) {
-    // Allocate a receive buffer large enough to avoid OS "message too long" errors even if a peer
-    // sends a slightly larger probe than our configured MTU.
-    let mut buf = vec![0u8; (config.max_mtu as usize + UDP_HEADER_SIZE + 64).max(2048)];
+    // We use BytesCodec to handle raw packets efficiently.
+    let mut framed = UdpFramed::new(socket, BytesCodec::new());
     let mut sessions: HashMap<SocketAddr, SessionState> = HashMap::new();
     let mut pending: HashMap<SocketAddr, PendingConnection> = HashMap::new();
     let mut tick = new_tick_interval();
@@ -503,38 +504,32 @@ async fn run_listener_muxer(
                 tracing::debug!("listener muxer cancelled");
                 break;
             }
-            res = socket.recv_from(&mut buf) => {
-                match res  {
-                    Ok((len, peer)) => {
-                        dispatch_datagram(
-                            &socket,
+            res = framed.next() => {
+                match res {
+                    Some(Ok((bytes, peer))) => {
+                         let bytes: bytes::BytesMut = bytes;
+                         dispatch_datagram(
+                            framed.get_ref(),
                             &config,
-                            &buf[..len],
+                            &bytes,
                             peer,
                             &mut sessions,
                             &mut pending,
                             &new_conn_tx,
                             &advertisement,
-
                         ).await;
                     }
-                    Err(e) => {
-                        if e.kind() == std::io::ErrorKind::ConnectionReset {
-                            // Windows ICMP port unreachable - ignore
-                            continue;
-                        }
-                        tracing::error!("UDP socket error: {}", e);
-                        // Don't break on transient errors
-                        continue;
+                    Some(Err(e)) => {
+                        tracing::error!("UdpFramed error: {}", e);
                     }
+                    None => break,
                 }
             }
             Some(msg) = outbound_rx.recv() => {
-                handle_outgoing_msg(&socket, config.max_mtu as usize, msg, &mut sessions, &config).await;
+                handle_outgoing_msg(framed.get_ref(), config.max_mtu as usize, msg, &mut sessions, &config).await;
             }
             _ = tick.tick() => {
-                tick_sessions(&socket, &mut sessions).await;
-
+                tick_sessions(framed.get_ref(), &mut sessions).await;
             }
         }
     }

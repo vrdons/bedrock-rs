@@ -17,7 +17,7 @@ bytes = { workspace = true }
 futures = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tokio-util = { workspace = true }
+tokio-util = { workspace = true, features = ["codec", "net"] }
 tracing = { workspace = true }
 
 [[example]]

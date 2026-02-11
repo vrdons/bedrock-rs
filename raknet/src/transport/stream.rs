@@ -6,9 +6,10 @@ use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{self, MissedTickBehavior, timeout};
+use tokio_util::codec::BytesCodec;
 use tokio_util::sync::CancellationToken;
-
-use futures::{Stream, StreamExt};
+use tokio_util::udp::UdpFramed;
+use futures::{SinkExt, Stream, StreamExt};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -16,7 +17,6 @@ use crate::protocol::{
     constants::{
         DEFAULT_SENT_DATAGRAM_TIMEOUT, DEFAULT_UNCONNECTED_MAGIC, MAX_ACK_SEQUENCES,
         MAXIMUM_MTU_SIZE, MAXIMUM_ORDERING_CHANNELS, MINIMUM_MTU_SIZE, RAKNET_PROTOCOL_VERSION,
-        UDP_HEADER_SIZE,
     },
     datagram::Datagram,
     packet::RaknetPacket,
@@ -423,7 +423,7 @@ struct ClientMuxerContext {
 /// Runs the background muxer loop that manages a client-side RakNet session over a UDP socket.
 #[tracing::instrument(skip(socket, context), fields(server = %context.server, mtu = context.config.mtu), level = "debug")]
 async fn run_client_muxer(socket: UdpSocket, mut context: ClientMuxerContext) {
-    let mut buf = vec![0u8; context.config.mtu as usize + UDP_HEADER_SIZE + 64];
+    let mut framed = UdpFramed::new(socket, BytesCodec::new());
     let mut managed: Option<ManagedSession> = None;
     let mut handshake_started = false;
     // We move the `ready` sender into a local Option
@@ -448,7 +448,7 @@ async fn run_client_muxer(socket: UdpSocket, mut context: ClientMuxerContext) {
             context.server_guid,
             now,
             context.secure_connection_established,
-            &socket,
+            &mut framed,
             context.server,
         )
         .await;
@@ -460,10 +460,10 @@ async fn run_client_muxer(socket: UdpSocket, mut context: ClientMuxerContext) {
                 tracing::debug!("client muxer cancelled");
                 break;
             }
-            res = socket.recv_from(&mut buf) => {
-                let (len, peer) = match res {
-                    Ok(v) => v,
-                    Err(e) => {
+            res = framed.next() => {
+                let (bytes, peer) = match res {
+                    Some(Ok(v)) => v,
+                    Some(Err(e)) => {
                         if e.kind() == std::io::ErrorKind::ConnectionReset {
                             // On Windows, this can happen if a previous send failed (ICMP Port Unreachable).
                             // It shouldn't kill the listener loop.
@@ -473,6 +473,7 @@ async fn run_client_muxer(socket: UdpSocket, mut context: ClientMuxerContext) {
                         tracing::error!("udp socket recv error: {}", e);
                         break;
                     }
+                    None => break,
                 };
 
                 if peer != context.server {
@@ -480,17 +481,17 @@ async fn run_client_muxer(socket: UdpSocket, mut context: ClientMuxerContext) {
                     continue;
                 }
 
-                if len == 0 {
+                if bytes.is_empty() {
                     continue;
                 }
 
                 // Filter out non-datagram packets (offline packets, e.g. OpenConnectionReply2)
                 // Valid datagrams must have VALID (0x80), ACK (0x40), or NACK (0x20) flags.
                 // Offline packets are typically ID < 0x20.
-                let header_byte = buf[0];
+                let header_byte = bytes[0];
                 if header_byte < 0x80 && (header_byte & 0x60) == 0 {
                     // Try to decode as a control packet to see if it's a connection failure
-                    let mut slice = &buf[..len];
+                    let mut slice = &bytes[..];
                     match RaknetPacket::decode(&mut slice) {
                         Ok(pkt) => {
                             let error = match pkt {
@@ -532,7 +533,7 @@ async fn run_client_muxer(socket: UdpSocket, mut context: ClientMuxerContext) {
                     continue;
                 }
 
-                let mut slice = &buf[..len];
+                let mut slice = &bytes[..];
                 if let Ok(dgram) = Datagram::decode(&mut slice) {
                     let now = Instant::now();
                     // Use context fields
@@ -550,7 +551,7 @@ async fn run_client_muxer(socket: UdpSocket, mut context: ClientMuxerContext) {
                         context.server_guid,
                         now,
                         context.secure_connection_established,
-                        &socket,
+                        &mut framed,
                         context.server
                     ).await;
 
@@ -601,7 +602,7 @@ async fn run_client_muxer(socket: UdpSocket, mut context: ClientMuxerContext) {
                         return;
                     }
 
-                    flush_built_datagrams(ms, &socket, context.server, now, false).await;
+                    flush_built_datagrams(ms, &mut framed, context.server, now, false).await;
                 } else {
                     tracing::debug!("failed to decode datagram");
                 }
@@ -624,7 +625,7 @@ async fn run_client_muxer(socket: UdpSocket, mut context: ClientMuxerContext) {
                     context.server_guid,
                     now,
                     context.secure_connection_established,
-                    &socket,
+                    &mut framed,
                     context.server
                 ).await;
                 let _ = ms.queue_app_packet(
@@ -633,14 +634,14 @@ async fn run_client_muxer(socket: UdpSocket, mut context: ClientMuxerContext) {
                     msg.channel,
                     msg.priority,
                 );
-                flush_built_datagrams(ms, &socket, context.server, now, false).await;
+                flush_built_datagrams(ms, &mut framed, context.server, now, false).await;
                 notify_client_ready(ms, &mut ready_signal);
             }
 
             _ = tick.tick() => {
                 if let Some(ms) = managed.as_mut() {
                     let now = Instant::now();
-                    flush_built_datagrams(ms, &socket, context.server, now, true).await;
+                    flush_built_datagrams(ms, &mut framed, context.server, now, true).await;
                     notify_client_ready(ms, &mut ready_signal);
                 }
             }
@@ -655,7 +656,7 @@ async fn run_client_muxer(socket: UdpSocket, mut context: ClientMuxerContext) {
             tracing::debug!("channel closed, sending disconnect notification");
             let _ = ms.send_disconnect(crate::protocol::state::DisconnectReason::Disconnected);
             // Flush the disconnect packet
-            flush_built_datagrams(&mut ms, &socket, context.server, Instant::now(), true).await;
+            flush_built_datagrams(&mut ms, &mut framed, context.server, Instant::now(), true).await;
         }
         _ => {}
     }
@@ -850,7 +851,7 @@ async fn ensure_client_handshake(
     server_guid: u64,
     now: Instant,
     secure_connection_established: bool,
-    socket: &UdpSocket,
+    framed: &mut UdpFramed<BytesCodec>,
     server: SocketAddr,
 ) {
     if !*handshake_started
@@ -859,14 +860,14 @@ async fn ensure_client_handshake(
             .is_ok()
     {
         *handshake_started = true;
-        flush_built_datagrams(managed, socket, server, now, false).await;
+        flush_built_datagrams(managed, framed, server, now, false).await;
     }
 }
 
 #[tracing::instrument(skip_all, fields(peer= %peer, on_tick = %run_tick), level = "trace")]
 async fn flush_built_datagrams(
     managed: &mut ManagedSession,
-    socket: &UdpSocket,
+    framed: &mut UdpFramed<BytesCodec>,
     peer: SocketAddr,
     now: Instant,
     run_tick: bool,
@@ -877,7 +878,7 @@ async fn flush_built_datagrams(
             let mut out = BytesMut::new();
             d.encode(&mut out)
                 .expect("Bad datagram made it into queue.");
-            let _ = socket.send_to(&out, peer).await;
+            let _ = framed.send((out.freeze(), peer)).await;
         }
     }
 
@@ -886,7 +887,7 @@ async fn flush_built_datagrams(
         let mut out = BytesMut::new();
         d.encode(&mut out)
             .expect("Bad datagram made it into queue.");
-        let _ = socket.send_to(&out, peer).await;
+        let _ = framed.send((out.freeze(), peer)).await;
     }
 
     // Delivery of any unblocked packets happens via drain_ready_to_app() at call sites.

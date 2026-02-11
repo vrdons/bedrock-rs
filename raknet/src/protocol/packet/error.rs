@@ -73,3 +73,18 @@ pub enum DecodeError {
     #[error("Invalid magic value for offline/unconnected packet.")]
     InvalidMagic,
 }
+
+impl From<std::io::Error> for DecodeError {
+    fn from(error: std::io::Error) -> Self {
+        match error.kind() {
+            std::io::ErrorKind::UnexpectedEof => DecodeError::UnexpectedEof,
+            _ => DecodeError::UnexpectedEof, // Generic fallback
+        }
+    }
+}
+
+impl From<std::io::Error> for EncodeError {
+    fn from(_: std::io::Error) -> Self {
+        EncodeError::MissingSplitInfo // Generic fallback, though IO errors are rare in encoding logic itself
+    }
+}

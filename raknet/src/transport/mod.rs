@@ -17,6 +17,7 @@ use crate::protocol::{packet::RaknetPacket, reliability::Reliability, state::Rak
 
 pub mod listener;
 mod listener_conn;
+pub mod codec;
 pub mod mux;
 pub mod stream;
 
