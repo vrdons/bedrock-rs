@@ -50,17 +50,14 @@ impl NethernetStream {
 
         // Configure SettingEngine to avoid IPv6 link-local binding issues
         let mut setting_engine = SettingEngine::default();
-        // Disable IPv6 to avoid link-local binding errors on Linux
-        setting_engine.set_ip_filter(Box::new(|ip| !ip.is_ipv6()));
 
         let api = APIBuilder::new()
             .with_media_engine(media_engine)
             .with_setting_engine(setting_engine)
             .build();
 
-        // Create peer connection with mDNS candidates for LAN
+        // Create peer connection
         let config = RTCConfiguration {
-            ice_servers: vec![],
             ..Default::default()
         };
 
