@@ -209,8 +209,14 @@ impl<S: Signaling + 'static> NethernetListener<S> {
                 }
             }
             // Clean up dispatcher when channel closes (if not already removed by state handler)
-            let mut dispatchers = signal_dispatchers_clone.lock().await;
-            dispatchers.remove(&connection_id);
+            {
+                let mut dispatchers = signal_dispatchers_clone.lock().await;
+                dispatchers.remove(&connection_id);
+            }
+
+            // Clean up candidate notifier if it wasn't already removed
+            let mut notifiers = candidate_notifiers_clone.lock().await;
+            notifiers.remove(&connection_id);
         });
 
         // Set remote description (offer)
