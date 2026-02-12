@@ -5,7 +5,7 @@
 use super::packet::Packet;
 use crate::error::Result;
 use crate::protocol::constants::ID_RESPONSE_PACKET;
-use crate::protocol::types::{read_bytes_u32, U32LE};
+use crate::protocol::types::{U32LE, read_bytes_u32};
 use std::io::{Read, Write};
 
 /// ResponsePacket is sent by servers to respond to discovery requests.
@@ -55,8 +55,9 @@ impl Packet for ResponsePacket {
         let mut buf = [0u8; 2048]; // 512 bytes of input -> 1024 bytes of hex
         for chunk in self.application_data.chunks(512) {
             let encoded_len = chunk.len() * 2;
-            hex::encode_to_slice(chunk, &mut buf[..encoded_len])
-                .map_err(|e| crate::error::NethernetError::Other(format!("hex encode error: {}", e)))?;
+            hex::encode_to_slice(chunk, &mut buf[..encoded_len]).map_err(|e| {
+                crate::error::NethernetError::Other(format!("hex encode error: {}", e))
+            })?;
             w.write_all(&buf[..encoded_len])?;
         }
         Ok(())

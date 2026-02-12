@@ -124,8 +124,7 @@ impl Message {
         if len <= MAX_MESSAGE_SIZE {
             // Optimize for the common single-segment case to avoid div_ceil overhead
             // and use direct Vec construction to avoid potential macro overhead.
-            let mut segments = Vec::with_capacity(1);
-            segments.push(MessageSegment::new(0, data));
+            let segments = vec![MessageSegment::new(0, data)];
             return Ok(segments);
         }
 
