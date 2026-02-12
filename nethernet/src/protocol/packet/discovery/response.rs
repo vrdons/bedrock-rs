@@ -5,7 +5,7 @@
 use super::packet::Packet;
 use crate::error::Result;
 use crate::protocol::constants::ID_RESPONSE_PACKET;
-use crate::protocol::types::{read_bytes_u32, write_bytes_u32};
+use crate::protocol::types::{read_bytes_u32, U32LE};
 use std::io::{Read, Write};
 
 /// ResponsePacket is sent by servers to respond to discovery requests.
@@ -43,9 +43,22 @@ impl Packet for ResponsePacket {
 
     /// Writes the packet's application_data as a hex-encoded byte sequence (prefixed with a 32-bit length) to the provided writer.
     fn write(&self, w: &mut dyn Write) -> Result<()> {
-        // Encode to hex
-        let hex_encoded = hex::encode(&self.application_data);
-        write_bytes_u32(w, hex_encoded.as_bytes())?;
+        // Encode to hex without intermediate allocation
+        let len = self.application_data.len();
+        let hex_len = len * 2;
+
+        // Write length prefix (u32)
+        // We cast to u32, assuming it fits (checked by MAX_BYTES elsewhere usually, but for discovery it's small)
+        U32LE(hex_len as u32).write(w)?;
+
+        // Write hex data in chunks to avoid large allocation
+        let mut buf = [0u8; 2048]; // 512 bytes of input -> 1024 bytes of hex
+        for chunk in self.application_data.chunks(512) {
+            let encoded_len = chunk.len() * 2;
+            hex::encode_to_slice(chunk, &mut buf[..encoded_len])
+                .map_err(|e| crate::error::NethernetError::Other(format!("hex encode error: {}", e)))?;
+            w.write_all(&buf[..encoded_len])?;
+        }
         Ok(())
     }
 

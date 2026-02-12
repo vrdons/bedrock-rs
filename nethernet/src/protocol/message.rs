@@ -78,7 +78,7 @@ impl Message {
         if self.expected_segments == 0 && segment.remaining_segments > 0 {
             self.expected_segments = segment.remaining_segments + 1;
             // Pre-allocate buffer to avoid reallocations
-            let estimated = self.expected_segments as usize * segment.data.len();
+            let estimated = self.expected_segments as usize * MAX_MESSAGE_SIZE;
             self.data.reserve(estimated);
         }
 
@@ -122,7 +122,11 @@ impl Message {
         let len = data.len();
 
         if len <= MAX_MESSAGE_SIZE {
-            return Ok(vec![MessageSegment::new(0, data)]);
+            // Optimize for the common single-segment case to avoid div_ceil overhead
+            // and use direct Vec construction to avoid potential macro overhead.
+            let mut segments = Vec::with_capacity(1);
+            segments.push(MessageSegment::new(0, data));
+            return Ok(segments);
         }
 
         let segment_count = len.div_ceil(MAX_MESSAGE_SIZE);
