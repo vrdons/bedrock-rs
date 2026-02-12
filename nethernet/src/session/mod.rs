@@ -193,9 +193,12 @@ impl Session {
 
     /// Checks if both reliable and unreliable channels are set.
     pub async fn is_fully_connected(&self) -> bool {
-        let reliable = self.reliable_channel.lock().await;
-        let unreliable = self.unreliable_channel.lock().await;
-        reliable.is_some() && unreliable.is_some()
+        // Avoid holding both locks at once to prevent potential deadlocks
+        let reliable_connected = self.reliable_channel.lock().await.is_some();
+        if !reliable_connected {
+            return false;
+        }
+        self.unreliable_channel.lock().await.is_some()
     }
 
     /// Waits for the WebRTC connection to be fully established.

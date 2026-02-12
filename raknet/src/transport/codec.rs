@@ -1,6 +1,8 @@
 use bytes::BytesMut;
 use tokio_util::codec::{Decoder, Encoder};
 
+use tracing::warn;
+
 use crate::protocol::{
     datagram::Datagram,
     packet::{DecodeError, EncodeError},
@@ -30,8 +32,13 @@ impl Decoder for RaknetCodec {
                 Ok(Some(datagram))
             }
             Err(e) => {
+                // Log the error and swallow it to prevent terminating the stream
+                // unless it's a fatal error (currently all decode errors are treated as non-fatal
+                // for the stream itself, just dropping the malformed packet).
+                // UdpFramed consumers will only see Err for fatal failures.
+                warn!("Failed to decode datagram: {:?}. Dropping packet.", e);
                 src.clear();
-                Err(e)
+                Ok(None)
             }
         }
     }
