@@ -191,6 +191,13 @@ impl Session {
         *self.closed.read().await
     }
 
+    /// Checks if both reliable and unreliable channels are set.
+    pub async fn is_fully_connected(&self) -> bool {
+        let reliable = self.reliable_channel.lock().await;
+        let unreliable = self.unreliable_channel.lock().await;
+        reliable.is_some() && unreliable.is_some()
+    }
+
     /// Waits for the WebRTC connection to be fully established.
     ///
     /// This method polls the ICE connection state until it reaches Connected or Completed state,

@@ -39,7 +39,7 @@ impl Stream for SessionStream {
                 match result {
                     Ok(Some(data)) => Poll::Ready(Some(Ok(data))),
                     Ok(None) => Poll::Ready(None),
-                    Err(e) => Poll::Ready(Some(Err(io::Error::new(io::ErrorKind::Other, e)))),
+                    Err(e) => Poll::Ready(Some(Err(io::Error::other(e)))),
                 }
             }
             Poll::Pending => Poll::Pending,
@@ -53,6 +53,7 @@ pub struct NethernetStream {
     remote_addr: SocketAddr,
     reader: StreamReader<SessionStream, Bytes>,
     send_future: Option<ReusableBoxFuture<'static, Result<()>>>,
+    shutdown_future: Option<ReusableBoxFuture<'static, Result<()>>>,
 }
 
 impl NethernetStream {
@@ -303,7 +304,7 @@ impl NethernetStream {
     pub fn from_session(session: Arc<Session>, remote_addr: SocketAddr) -> Self {
         let session_clone = session.clone();
         let recv_future = ReusableBoxFuture::new(async move { session_clone.recv().await });
-        
+
         let stream = SessionStream {
             session: session.clone(),
             recv_future,
@@ -314,6 +315,7 @@ impl NethernetStream {
             remote_addr,
             reader: StreamReader::new(stream),
             send_future: None,
+            shutdown_future: None,
         }
     }
 
@@ -343,48 +345,6 @@ impl NethernetStream {
     }
 }
 
-impl Stream for NethernetStream {
-    type Item = Result<Bytes>;
-
-    /// Polls the stream for the next incoming item from the underlying session.
-    ///
-    /// The method drives an internal receive future and yields the next item when it becomes available.
-    ///
-    /// # Returns
-    ///
-    /// - `Poll::Ready(Some(Ok(Bytes)))` when a data frame is received.
-    /// - `Poll::Ready(None)` when the stream has ended (no more data).
-    /// - `Poll::Ready(Some(Err(e)))` when an error occurred while receiving.
-    /// - `Poll::Pending` when no item is ready yet.
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match Pin::new(self.reader.get_mut()).poll_next(cx) {
-            Poll::Ready(Some(Ok(data))) => Poll::Ready(Some(Ok(data))),
-            Poll::Ready(Some(Err(e))) => {
-                if e.kind() == io::ErrorKind::Other {
-                    // Try to recover NethernetError
-                    let inner = e.into_inner();
-                    if let Some(boxed_err) = inner {
-                        match boxed_err.downcast::<NethernetError>() {
-                            Ok(nethernet_err) => Poll::Ready(Some(Err(*nethernet_err))),
-                            Err(boxed_err) => {
-                                let io_err = io::Error::new(io::ErrorKind::Other, boxed_err);
-                                Poll::Ready(Some(Err(NethernetError::Io(io_err))))
-                            }
-                        }
-                    } else {
-                        let io_err = io::Error::new(io::ErrorKind::Other, "Unknown IO error");
-                        Poll::Ready(Some(Err(NethernetError::Io(io_err))))
-                    }
-                } else {
-                    Poll::Ready(Some(Err(NethernetError::Io(e))))
-                }
-            }
-            Poll::Ready(None) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
 impl AsyncRead for NethernetStream {
     fn poll_read(
         mut self: Pin<&mut Self>,
@@ -408,7 +368,7 @@ impl AsyncWrite for NethernetStream {
                     // Previous send completed
                 }
                 Poll::Ready(Err(e)) => {
-                    return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e)));
+                    return Poll::Ready(Err(io::Error::other(e)));
                 }
                 Poll::Pending => {
                     // Still sending
@@ -422,23 +382,29 @@ impl AsyncWrite for NethernetStream {
         let data = Bytes::copy_from_slice(buf);
         let len = data.len();
         let session = self.session.clone();
-        let fut = ReusableBoxFuture::new(async move { session.send(data).await });
-        self.send_future = Some(fut);
-        
-        // We've buffered the write, so we return the number of bytes "written"
-        // The actual transmission happens in subsequent poll_flush calls or next poll_write
+        let mut fut = ReusableBoxFuture::new(async move { session.send(data).await });
+
+        // Poll immediately to start the future
+        match fut.poll(cx) {
+            Poll::Ready(Ok(())) => {
+                // Completed immediately
+            }
+            Poll::Ready(Err(e)) => {
+                return Poll::Ready(Err(io::Error::other(e)));
+            }
+            Poll::Pending => {
+                self.send_future = Some(fut);
+            }
+        }
+
         Poll::Ready(Ok(len))
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         if let Some(mut fut) = self.send_future.take() {
             match fut.poll(cx) {
-                Poll::Ready(Ok(())) => {
-                    Poll::Ready(Ok(()))
-                }
-                Poll::Ready(Err(e)) => {
-                    Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e)))
-                }
+                Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+                Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::other(e))),
                 Poll::Pending => {
                     self.send_future = Some(fut);
                     Poll::Pending
@@ -449,7 +415,31 @@ impl AsyncWrite for NethernetStream {
         }
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.poll_flush(cx)
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        // First flush any pending writes
+        match self.as_mut().poll_flush(cx) {
+            Poll::Ready(Ok(())) => {}
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+            Poll::Pending => return Poll::Pending,
+        }
+
+        if self.shutdown_future.is_none() {
+            let session = self.session.clone();
+            self.shutdown_future =
+                Some(ReusableBoxFuture::new(async move { session.close().await }));
+        }
+
+        if let Some(mut fut) = self.shutdown_future.take() {
+            match fut.poll(cx) {
+                Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+                Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::other(e))),
+                Poll::Pending => {
+                    self.shutdown_future = Some(fut);
+                    Poll::Pending
+                }
+            }
+        } else {
+            Poll::Ready(Ok(()))
+        }
     }
 }

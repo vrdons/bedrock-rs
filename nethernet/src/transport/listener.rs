@@ -274,14 +274,22 @@ impl<S: Signaling + 'static> NethernetListener<S> {
                     RELIABLE_CHANNEL => {
                         let _ = session.set_reliable_channel(channel).await;
                         // Check if both channels are ready
-                        // If so, signal that connection is ready
-                        let mut tx_guard = ready_tx.lock().await;
-                        if let Some(tx) = tx_guard.take() {
-                            let _ = tx.send(());
+                        if session.is_fully_connected().await {
+                            let mut tx_guard = ready_tx.lock().await;
+                            if let Some(tx) = tx_guard.take() {
+                                let _ = tx.send(());
+                            }
                         }
                     }
                     UNRELIABLE_CHANNEL => {
                         let _ = session.set_unreliable_channel(channel).await;
+                        // Check if both channels are ready
+                        if session.is_fully_connected().await {
+                            let mut tx_guard = ready_tx.lock().await;
+                            if let Some(tx) = tx_guard.take() {
+                                let _ = tx.send(());
+                            }
+                        }
                     }
                     _ => {}
                 }

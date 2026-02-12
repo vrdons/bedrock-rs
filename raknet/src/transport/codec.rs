@@ -9,6 +9,7 @@ use crate::protocol::{
 /// A codec for decoding and encoding RakNet datagrams over UDP.
 ///
 /// This codec is designed to be used with [`tokio_util::udp::UdpFramed`].
+#[allow(dead_code)]
 pub struct RaknetCodec;
 
 impl Decoder for RaknetCodec {
@@ -22,23 +23,14 @@ impl Decoder for RaknetCodec {
 
         match Datagram::decode(src) {
             Ok(datagram) => {
-                // Datagram::decode might leave trailing bytes if the packet has padding we didn't consume properly,
-                // or if it was malformed but partially valid.
-                // However, `UdpFramed` works frame-by-frame. The `src` buffer contains exactly one UDP packet payload.
-                // We should consume the entire buffer or consider it an error if there's significant data left?
-                // RakNet datagrams can have padding at the end? `Datagram::decode` handles packets until EOF.
-                // So if we return Ok, we assume we consumed what we needed.
-                // We should clear the buffer to signal we're done with this frame, just in case.
+                // UdpFramed delivers exactly one UDP payload per frame, Datagram::decode consumes
+                // the packet contents, and therefore we clear the src buffer after successful
+                // decode to mark the frame consumed.
                 src.clear();
                 Ok(Some(datagram))
             }
             Err(e) => {
-                // If decoding fails, we discard the buffer.
                 src.clear();
-                // We might want to return the error or swallow it.
-                // Returning the error might terminate the stream depending on how it's handled.
-                // For a server, we probably don't want to crash on a bad packet.
-                // But let's return it and handle it in the stream consumer.
                 Err(e)
             }
         }

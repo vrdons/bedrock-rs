@@ -7,11 +7,11 @@
 
 use nethernet::NethernetStream;
 use nethernet::signaling::lan::LanSignaling;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use rand::RngCore;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::Level;
 use tracing_subscriber::{filter, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -97,6 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         tracing::debug!("📤 Sending: {}", message);
         stream.write_all(message.as_bytes()).await?;
+        stream.flush().await?;
 
         // Receive echo response
         let mut buf = vec![0u8; 1024];
@@ -118,6 +119,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("📦 Sending large packet (20KB)...");
     let large_data = vec![0xAB; 20_000];
     stream.write_all(&large_data).await?;
+    stream.flush().await?;
 
     // Read back large packet
     let mut response = vec![0u8; 20_000];

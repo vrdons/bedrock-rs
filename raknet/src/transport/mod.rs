@@ -15,9 +15,9 @@ use std::net::SocketAddr;
 
 use crate::protocol::{packet::RaknetPacket, reliability::Reliability, state::RakPriority};
 
+pub mod codec;
 pub mod listener;
 mod listener_conn;
-pub mod codec;
 pub mod mux;
 pub mod stream;
 

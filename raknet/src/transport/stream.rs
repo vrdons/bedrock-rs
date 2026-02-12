@@ -2,6 +2,9 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::{Duration, Instant};
 
 use bytes::{BufMut, Bytes, BytesMut};
+use futures::{SinkExt, Stream, StreamExt};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -9,9 +12,6 @@ use tokio::time::{self, MissedTickBehavior, timeout};
 use tokio_util::codec::BytesCodec;
 use tokio_util::sync::CancellationToken;
 use tokio_util::udp::UdpFramed;
-use futures::{SinkExt, Stream, StreamExt};
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 use crate::protocol::{
     constants::{
