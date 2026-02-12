@@ -184,17 +184,25 @@ impl<S: Signaling + 'static> NethernetListener<S> {
             while let Some(sig) = signal_rx.recv().await {
                 if sig.signal_type == SignalType::Candidate {
                     // Deserialize sig.data into an RTCIceCandidateInit
-                    if let Ok(candidate_init) = serde_json::from_str::<
+                    let candidate_init = match serde_json::from_str::<
                         webrtc::ice_transport::ice_candidate::RTCIceCandidateInit,
                     >(&sig.data)
                     {
-                        if let Err(e) = peer_connection_clone
-                            .add_ice_candidate(candidate_init)
-                            .await
-                        {
-                            tracing::warn!("Failed to add ICE candidate: {}", e);
-                            continue;
-                        }
+                        Ok(init) => init,
+                        Err(_) => webrtc::ice_transport::ice_candidate::RTCIceCandidateInit {
+                            candidate: sig.data.clone(),
+                            sdp_mid: None,
+                            sdp_mline_index: None,
+                            username_fragment: None,
+                        },
+                    };
+
+                    if let Err(e) = peer_connection_clone
+                        .add_ice_candidate(candidate_init)
+                        .await
+                    {
+                        tracing::warn!("Failed to add ICE candidate: {}", e);
+                        continue;
                     }
 
                     // Notify waiting handler AFTER adding first candidate to peer connection

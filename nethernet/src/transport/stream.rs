@@ -7,7 +7,7 @@ use crate::session::Session;
 use crate::signaling::Signaling;
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
-use rand::RngCore;
+use rand::Rng;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -20,6 +20,7 @@ use webrtc::api::APIBuilder;
 use webrtc::api::media_engine::MediaEngine;
 use webrtc::api::setting_engine::SettingEngine;
 use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
+use webrtc::ice::network_type::NetworkType;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 
 /// NetherNet stream - data transmission over WebRTC
@@ -77,7 +78,8 @@ impl NethernetStream {
         let media_engine = MediaEngine::default();
 
         // Configure SettingEngine to avoid IPv6 link-local binding issues
-        let setting_engine = SettingEngine::default();
+        let mut setting_engine = SettingEngine::default();
+        setting_engine.set_network_types(vec![NetworkType::Udp4]);
 
         let api = APIBuilder::new()
             .with_media_engine(media_engine)
@@ -172,12 +174,16 @@ impl NethernetStream {
         let offer = peer_connection.create_offer(None).await?;
         peer_connection.set_local_description(offer.clone()).await?;
 
+        // Create signal stream BEFORE sending offer to avoid race condition where
+        // answer/candidates arrive before we subscribe
+        let mut signals = signaling.signals();
+
         // Signal the offer
         let offer_signal = Signal::offer(connection_id, offer.sdp, remote_network_id.clone());
         signaling.signal(offer_signal).await?;
 
         // Wait for answer and handle candidates
-        let mut signals = signaling.signals();
+        let mut pending_candidates = Vec::new();
         let answer = loop {
             if let Some(signal) = signals.next().await {
                 if signal.connection_id == connection_id {
@@ -186,13 +192,22 @@ impl NethernetStream {
                             break signal.data;
                         }
                         SignalType::Candidate => {
-                            // Add remote ICE candidate - deserialize full RTCIceCandidateInit
-                            if let Ok(candidate_init) = serde_json::from_str::<
+                            // Buffer remote ICE candidates until after set_remote_description
+                            let candidate_init = match serde_json::from_str::<
                                 webrtc::ice_transport::ice_candidate::RTCIceCandidateInit,
                             >(&signal.data)
                             {
-                                let _ = peer_connection.add_ice_candidate(candidate_init).await;
-                            }
+                                Ok(init) => init,
+                                Err(_) => {
+                                    webrtc::ice_transport::ice_candidate::RTCIceCandidateInit {
+                                        candidate: signal.data.clone(),
+                                        sdp_mid: None,
+                                        sdp_mline_index: None,
+                                        username_fragment: None,
+                                    }
+                                }
+                            };
+                            pending_candidates.push(candidate_init);
                         }
                         _ => {}
                     }
@@ -209,6 +224,15 @@ impl NethernetStream {
             )?;
         peer_connection.set_remote_description(answer_desc).await?;
 
+        tracing::trace!("Applying {} buffered candidates", pending_candidates.len());
+        for candidate_init in pending_candidates {
+            if let Err(e) = peer_connection.add_ice_candidate(candidate_init).await {
+                tracing::warn!("Failed to add buffered ICE candidate: {}", e);
+            } else {
+                tracing::debug!("Successfully added buffered ICE candidate");
+            }
+        }
+
         // Continue processing candidates with cancellation support
         let peer_connection_clone = peer_connection.clone();
         let cancel_token = CancellationToken::new();
@@ -218,6 +242,7 @@ impl NethernetStream {
                 tokio::select! {
                     _ = cancel_token_clone.cancelled() => {
                         // Task cancelled, exit loop
+                        tracing::debug!("Candidate processing task cancelled");
                         break;
                     }
                     signal_opt = signals.next() => {
@@ -225,14 +250,29 @@ impl NethernetStream {
                             if signal.connection_id == connection_id
                                 && signal.signal_type == SignalType::Candidate
                             {
-                                // Add remote ICE candidate - deserialize full RTCIceCandidateInit
-                                if let Ok(candidate_init) = serde_json::from_str::<
+                                let candidate_init = match serde_json::from_str::<
                                     webrtc::ice_transport::ice_candidate::RTCIceCandidateInit,
                                 >(&signal.data)
                                 {
-                                    let _ = peer_connection_clone
-                                        .add_ice_candidate(candidate_init)
-                                        .await;
+                                    Ok(init) => init,
+                                    Err(_) => {
+                                        tracing::debug!("Failed to parse candidate as JSON, treating as raw string");
+                                        webrtc::ice_transport::ice_candidate::RTCIceCandidateInit {
+                                            candidate: signal.data.clone(),
+                                            sdp_mid: None,
+                                            sdp_mline_index: None,
+                                            username_fragment: None,
+                                        }
+                                    }
+                                };
+                                tracing::debug!("Received ICE candidate: {}", candidate_init.candidate);
+                                if let Err(e) = peer_connection_clone
+                                    .add_ice_candidate(candidate_init)
+                                    .await
+                                {
+                                    tracing::warn!("Failed to add ICE candidate: {}", e);
+                                } else {
+                                    tracing::debug!("Successfully added ICE candidate");
                                 }
                             }
                         } else {

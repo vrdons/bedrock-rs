@@ -7,7 +7,7 @@
 
 use nethernet::NethernetStream;
 use nethernet::signaling::lan::LanSignaling;
-use rand::RngCore;
+use rand::Rng;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
