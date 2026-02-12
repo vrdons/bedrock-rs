@@ -16,7 +16,7 @@ pub struct Session {
     unreliable_channel: Arc<Mutex<Option<Arc<RTCDataChannel>>>>,
     message_buffer: Arc<Mutex<Message>>,
     packet_tx: mpsc::Sender<Bytes>,
-    packet_rx: Arc<Mutex<Option<mpsc::Receiver<Bytes>>>>,
+    packet_rx: Arc<Mutex<mpsc::Receiver<Bytes>>>,
     closed: Arc<RwLock<bool>>,
 }
 
@@ -36,7 +36,7 @@ impl Session {
             unreliable_channel: Arc::new(Mutex::new(None)),
             message_buffer: Arc::new(Mutex::new(Message::new())),
             packet_tx,
-            packet_rx: Arc::new(Mutex::new(Some(packet_rx))),
+            packet_rx: Arc::new(Mutex::new(packet_rx)),
             closed: Arc::new(RwLock::new(false)),
         }
     }
@@ -136,31 +136,14 @@ impl Session {
     /// This returns the next reassembled message produced by the session's incoming
     /// segment stream. If the session has been closed, or the underlying packet
     /// channel has been closed, this returns `Ok(None)`.
-    ///
-    /// Errors:
-    /// - Returns `Err(NethernetError::DataChannel(...))` if another caller is
-    ///   already awaiting `recv()` (the receiver is temporarily taken to avoid
-    ///   holding a lock across an await point).
     pub async fn recv(&self) -> Result<Option<Bytes>> {
         if *self.closed.read().await {
             return Ok(None);
         }
 
-        // Take the receiver out of the Option to avoid holding the lock across await
-        let mut rx = {
-            let mut guard = self.packet_rx.lock().await;
-            guard.take().ok_or_else(|| {
-                NethernetError::DataChannel("Receiver already in use by another caller".to_string())
-            })?
-        };
-
-        // Receive outside the lock
-        let result = rx.recv().await;
-
-        // Put the receiver back
-        *self.packet_rx.lock().await = Some(rx);
-
-        Ok(result)
+        // Lock and receive - the lock is automatically released when MutexGuard
+        // goes out of scope at the end of this expression, even if cancelled
+        Ok(self.packet_rx.lock().await.recv().await)
     }
 
     /// Shuts down the session by marking it closed and closing any attached data channels and the peer connection.
@@ -206,5 +189,52 @@ impl Session {
     /// Reports whether the session has been closed.
     pub async fn is_closed(&self) -> bool {
         *self.closed.read().await
+    }
+
+    /// Checks if both reliable and unreliable channels are set.
+    pub async fn is_fully_connected(&self) -> bool {
+        // Avoid holding both locks at once to prevent potential deadlocks
+        let reliable_connected = self.reliable_channel.lock().await.is_some();
+        if !reliable_connected {
+            return false;
+        }
+        self.unreliable_channel.lock().await.is_some()
+    }
+
+    /// Waits for the WebRTC connection to be fully established.
+    ///
+    /// This method polls the ICE connection state until it reaches Connected or Completed state,
+    /// or returns an error if the connection fails.
+    pub async fn wait_for_connection(&self, timeout_ms: Option<u64>) -> Result<()> {
+        let timeout = timeout_ms.unwrap_or(5000);
+        let max_attempts = (timeout / 100).max(1); // Check every 100ms
+
+        for attempt in 0..max_attempts {
+            let state = self.connection_state();
+
+            tracing::trace!(
+                "Waiting for WebRTC connection... (attempt {}/{}), state: {:?}",
+                attempt + 1,
+                max_attempts,
+                state
+            );
+
+            match state {
+                RTCIceConnectionState::Connected | RTCIceConnectionState::Completed => {
+                    tracing::info!("WebRTC connection established!");
+                    return Ok(());
+                }
+                RTCIceConnectionState::Failed
+                | RTCIceConnectionState::Disconnected
+                | RTCIceConnectionState::Closed => {
+                    return Err(NethernetError::ConnectionClosed);
+                }
+                _ => {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
+            }
+        }
+
+        Err(NethernetError::Timeout)
     }
 }

@@ -32,11 +32,13 @@ impl MessageSegment {
     /// Decode a MessageSegment from bytes.
     ///
     /// This is zero-copy as the input `Bytes` is used for the payload.
+    /// Minimum length is 2 bytes (1 for segment count + at least 1 for data) to match go-nethernet.
     pub fn decode(mut data: Bytes) -> Result<Self> {
-        if data.is_empty() {
-            return Err(NethernetError::MessageParse(
-                "Message too short, expected at least 1 byte".to_string(),
-            ));
+        if data.len() < 2 {
+            return Err(NethernetError::MessageParse(format!(
+                "Message too short, expected at least 2 bytes, got {}",
+                data.len()
+            )));
         }
 
         let remaining_segments = data[0];
@@ -76,7 +78,7 @@ impl Message {
         if self.expected_segments == 0 && segment.remaining_segments > 0 {
             self.expected_segments = segment.remaining_segments + 1;
             // Pre-allocate buffer to avoid reallocations
-            let estimated = self.expected_segments as usize * MAX_MESSAGE_SIZE;
+            let estimated = self.expected_segments as usize * segment.data.len();
             self.data.reserve(estimated);
         }
 

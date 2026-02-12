@@ -14,6 +14,8 @@ pub enum EncodeError {
     MissingOrderingIndex,
     #[error("Ordering channel missing for ordered/sequenced packet.")]
     MissingOrderingChannel,
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// Errors that may occur while decoding RakNet protocol values or packets.
@@ -72,4 +74,6 @@ pub enum DecodeError {
     MissingSplitInfo,
     #[error("Invalid magic value for offline/unconnected packet.")]
     InvalidMagic,
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
 }

@@ -5,7 +5,6 @@
 //! - Accepts incoming WebRTC connections
 //! - Handles packets from clients
 
-use futures::StreamExt;
 use nethernet::signaling::lan::LanSignaling;
 use nethernet::{NethernetListener, ServerData, Signaling};
 use std::net::SocketAddr;
@@ -50,37 +49,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("✅ Server ready and responding to LAN discovery");
 
     // Accept incoming connections
-    while let Some(session) = listener.next().await {
-        tracing::info!("🔗 New client connected");
+    loop {
+        match listener.accept().await {
+            Ok(session) => {
+                tracing::info!("🔗 New client connected");
 
-        // Spawn a task to handle this client
-        tokio::spawn(async move {
-            let mut packet_count = 0;
+                // Spawn a task to handle this client
+                tokio::spawn(async move {
+                    let mut packet_count = 0;
 
-            loop {
-                match session.recv().await {
-                    Ok(Some(data)) => {
-                        packet_count += 1;
-                        // Echo the packet back
-                        if let Err(e) = session.send(data).await {
-                            tracing::error!("Failed to send packet: {}", e);
-                            break;
+                    loop {
+                        match session.recv().await {
+                            Ok(Some(data)) => {
+                                packet_count += 1;
+                                // Echo the packet back
+                                if let Err(e) = session.send(data).await {
+                                    tracing::error!("Failed to send packet: {}", e);
+                                    break;
+                                }
+                            }
+                            Ok(None) => {
+                                tracing::info!("Client disconnected gracefully");
+                                break;
+                            }
+                            Err(e) => {
+                                tracing::error!("Error receiving packet: {}", e);
+                                break;
+                            }
                         }
                     }
-                    Ok(None) => {
-                        tracing::info!("Client disconnected gracefully");
-                        break;
-                    }
-                    Err(e) => {
-                        tracing::error!("Error receiving packet: {}", e);
-                        break;
-                    }
-                }
+
+                    tracing::info!("Client session ended ({} packets received)", packet_count);
+                });
             }
-
-            tracing::info!("Client session ended ({} packets received)", packet_count);
-        });
+            Err(e) => {
+                tracing::error!("Failed to accept connection: {}", e);
+            }
+        }
     }
-
-    Ok(())
 }

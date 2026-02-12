@@ -263,7 +263,7 @@ impl LanSignaling {
 
         match packet.id() {
             constants::ID_REQUEST_PACKET => {
-                tracing::info!(
+                tracing::trace!(
                     "Received discovery REQUEST from {} (network_id: {})",
                     addr,
                     sender_id
@@ -280,14 +280,8 @@ impl LanSignaling {
                     let response = ResponsePacket::new(app_data);
                     let response_data = discovery::marshal(&response, own_network_id)?;
                     let _ = socket.send_to(&response_data, addr).await;
-                    tracing::info!(
-                        "Sent discovery RESPONSE to {} (server: '{}', level: '{}')",
-                        addr,
-                        data.server_name,
-                        data.level_name
-                    );
                 } else {
-                    tracing::warn!(
+                    tracing::debug!(
                         "No server data configured - cannot respond to discovery request from {}",
                         addr
                     );
@@ -303,13 +297,6 @@ impl LanSignaling {
                     })?;
 
                 if let Ok(server_info) = ServerData::unmarshal(&response.application_data) {
-                    tracing::debug!(
-                        "Discovered server from {} (network_id: {}): '{}' - '{}'",
-                        addr,
-                        sender_id,
-                        server_info.server_name,
-                        server_info.level_name
-                    );
                     discovered_servers
                         .write()
                         .await
