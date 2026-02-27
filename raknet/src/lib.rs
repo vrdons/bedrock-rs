@@ -48,10 +48,12 @@
 //!     Ok(())
 //! }
 //! ```
+pub mod builders;
 pub mod error;
 pub mod protocol;
 pub mod session;
 pub mod transport;
 
+pub use builders::*;
 pub use error::RaknetError;
 pub use transport::{RaknetListener, RaknetStream};
