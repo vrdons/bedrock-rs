@@ -30,18 +30,24 @@ serde_json = "1.0.149"
 criterion = "0.8.2"
 bytes = { workspace = true }
 
+[features]
+default = ["raknet", "nethernet"]
+raknet = ["dep:raknet"]
+nethernet = ["dep:nethernet"]
 
 [lib]
 bench = false
 
 [dependencies]
-raknet = { path = "./raknet" }
-nethernet = { path = "./nethernet" }
+raknet = { path = "./raknet", optional = true }
+nethernet = { path = "./nethernet", optional = true }
 
 [[bench]]
 name = "nethernet"
 harness = false
+required-features = ["nethernet"]
 
 [[bench]]
 name = "raknet"
 harness = false
+required-features = ["raknet"]

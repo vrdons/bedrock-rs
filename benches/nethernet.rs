@@ -1,3 +1,5 @@
+#![cfg(feature = "nethernet")]
+
 use bytes::Bytes;
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use nethernet::protocol::packet::discovery::{

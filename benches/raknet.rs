@@ -1,3 +1,5 @@
+#![cfg(feature = "raknet")]
+
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use raknet::protocol::{
